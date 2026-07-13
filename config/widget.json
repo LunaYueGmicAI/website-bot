@@ -1,0 +1,56 @@
+{
+  "greeting": "Hi 👋 想了解点什么?",
+  "quickActions": [
+    {
+      "id": "odm",
+      "label": "🏭 定制/ODM",
+      "type": "topic",
+      "intent": "odm",
+      "opener": "我们能做 ODM/OEM 定制,从外观、固件到量产都能包。方便说下你大概想做什么产品、预计数量和上市时间吗?"
+    },
+    {
+      "id": "products",
+      "label": "📦 看产品",
+      "type": "link",
+      "url": "https://gmic.ai/products/"
+    },
+    {
+      "id": "demo",
+      "label": "📅 预约演示",
+      "type": "link",
+      "url": "TODO_CALENDAR_URL"
+    },
+    {
+      "id": "faq",
+      "label": "❓ 常见问题",
+      "type": "faq"
+    }
+  ],
+  "faq": [
+    {
+      "q": "你们是做什么的?",
+      "a": "TODO: marketing 填写标准话术",
+      "link": "https://gmic.ai/about-gmic-ai/"
+    },
+    {
+      "q": "能定制/贴牌(ODM/OEM)吗?最小起订量多少?",
+      "a": "TODO: marketing 填写 MOQ 话术",
+      "link": "https://gmic.ai/ai-hardware-odm-oem/"
+    },
+    {
+      "q": "支持哪些行业/场景?",
+      "a": "TODO: marketing 填写",
+      "link": "https://gmic.ai/products/"
+    },
+    {
+      "q": "大概多久能出样/量产?",
+      "a": "TODO: marketing 填写交期话术",
+      "link": null
+    },
+    {
+      "q": "怎么联系/报价?",
+      "a": "TODO: marketing 填写",
+      "link": "https://gmic.ai/contact-gmic-ai/"
+    }
+  ]
+}
