@@ -32,9 +32,10 @@ python -m venv venv
 source venv/Scripts/activate      # Windows Git Bash;  source venv/bin/activate on *nix
 pip install -r requirements.txt
 cp .env.example .env               # fill in keys
-python app.py                      # dev only
-# production: gunicorn -w 1 -b 0.0.0.0:$PORT app:app   (single worker — see DESIGN.md)
+uvicorn app:app --reload --port 8090     # dev (auto-reload)
+# production: uvicorn app:app --host 0.0.0.0 --port 8090   (single process — async handles concurrency)
 ```
+FastAPI (async). Interactive API docs at `/docs` when running.
 
 ## Status
 P1 backend scaffold. Blocked on P0 (Slack app token) for end-to-end Slack test; everything

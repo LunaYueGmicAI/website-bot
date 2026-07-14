@@ -2,31 +2,41 @@
 会话存储 + 对话内存管控。
 
 【两层记忆模型】
-  - 工作记忆(本模块,放在进程内存/RAM):只保存"当前正在进行"的对话,尽量小。
+  - 工作记忆(本模块,放进程内存/RAM):只保存"当前正在进行"的对话,尽量小。
   - 归档(Slack):每一轮对话一产生就实时转发到 Slack,永久保存。
-  因为 Slack 里什么都有,所以内存这一层可以随时裁剪/清理,丢了也不心疼(不丢数据)。
+  因为 Slack 里什么都有,所以内存这层可以随时裁剪/清理,丢了也不丢数据。
 
-【为什么要管控内存】
-  如果每通对话都无限增长、且永不释放,服务器内存会被慢慢吃光。所以我们用四道闸门
-  把内存控制在很小的范围(详见下面各方法的注释)。
+【四道闸门控制内存】① 单会话轮数上限 ② TTL 超时清理 ③ 全局数量上限+LRU ④ 单条大小限制(在 api 层)
 
 【主键 session_id】
-  每个用户对应一个 session_id,它同时是:①本字典的 key ②Slack thread 的归属
-  ③前端浏览器的身份。一个进程、一个字典、很多用户,靠 key 隔开,永远不会串。
+  每个用户对应一个 session_id,它同时是:①本字典的 key ②Slack thread 的归属 ③前端浏览器身份。
+  一个进程、一个字典、很多用户,靠 key 隔开,永远不会串。
+
+【并发说明】后端是 FastAPI 异步(单进程事件循环)。本模块的方法都是"纯同步、内部不 await",
+  所以在事件循环里天然是原子的(不会执行到一半被别的协程插进来)。那把 threading.Lock 因此
+  基本用不到,但留着无害(万一以后引入线程池还能兜底)。
 """
 import os
+import re
 import time
+import asyncio
 import threading
 from collections import OrderedDict
 
 # ---- 可调参数(从 .env 读,给了默认值)----
-TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "1800"))    # 闲置多久算过期(默认 30 分钟)
-MAX_TURNS = int(os.getenv("MAX_TURNS_IN_MEMORY", "20"))        # 单会话内存里最多留几轮
-MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "500"))          # 全局最多同时保留几个会话
-HISTORY_TURNS = int(os.getenv("LLM_HISTORY_TURNS", "8"))       # 每轮喂给大模型的最近几轮
+TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "1800"))     # 闲置多久算过期(默认 30 分钟)
+MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "500"))           # 全局最多同时保留几个会话
+HISTORY_TURNS = int(os.getenv("LLM_HISTORY_TURNS", "8"))        # 每轮喂给大模型的最近几轮
+# 【改动①】内存里最多留几轮 = 默认等于喂给 LLM 的轮数。
+#   为什么不多留:多出来的既不发给模型、前端也不靠服务器回滚(前端自己存显示副本),
+#   而老对话又已经在 Slack 归档,所以"多留"没有意义。约束:必须 >= HISTORY_TURNS。
+MAX_TURNS = int(os.getenv("MAX_TURNS_IN_MEMORY", str(HISTORY_TURNS)))
 
-# lead(线索)里我们关心的字段。missing 字段单独算,不在这里。
+# lead(线索)里我们会存的字段。missing 单独算,不在这里。
 _LEAD_FIELDS = ("name", "email", "phone", "company", "need")
+
+# 【改动③】写入前的格式校验:光靠 prompt 说"别编造"不够稳,代码这里再兜一层。
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _now():
@@ -34,49 +44,54 @@ def _now():
     return time.time()
 
 
+def _valid_email(v):
+    # 例:"a@x.com" -> True;"我的邮箱" / "a@x" -> False。不合格就不写进 lead。
+    return bool(_EMAIL_RE.match(v.strip()))
+
+
+def _valid_phone(v):
+    # 抽出所有数字判断位数(容忍 +、空格、横杠)。例:"+1 (669) 900-0008" -> 11 位数字 -> True。
+    digits = re.sub(r"\D", "", v)
+    return 7 <= len(digits) <= 15
+
+
 class SessionStore:
     def __init__(self):
-        # 用 OrderedDict 而不是普通 dict:它能记住插入/访问顺序,
-        # 这样实现 LRU(最近最少使用)淘汰几乎零成本——把刚用过的挪到末尾,
-        # 要淘汰时直接从头部(最久没动的)删。
+        # 用 OrderedDict 而非普通 dict:它记住顺序,能几乎零成本实现 LRU——
+        # 刚用过的挪到末尾,要淘汰时从头部(最久没动的)删。
         self._data = OrderedDict()
-        # 多个用户的请求会并发进来(Flask 多线程),字典读写要加锁,防止数据错乱。
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()   # 见文件顶部"并发说明":基本用不到,留着兜底
 
     # ======================== 生命周期 ========================
     def get_or_create(self, sid, meta=None):
         """
         拿到某用户的会话;没有就新建。
 
-        例:用户第一次点开 widget,前端带着 session_id="sess_ab12" 请求进来 →
-            这里没有它 → 新建一条空会话(intent 空、lead 空、turns 空)。
-            用户第二次说话,同一个 sid 再进来 → 直接返回上次那条,并更新"最近活跃时间"。
+        例:用户第一次点开 widget,前端带 session_id="sess_ab12" 进来 → 这里没有它 → 新建空会话。
+            第二次说话,同一个 sid 再进来 → 直接返回上次那条,并刷新"最近活跃时间"。
         """
         with self._lock:
             s = self._data.get(sid)
             if s is None:
-                # 新建一条会话骨架
                 s = {
                     "id": sid,
                     "created_at": _now(),
-                    "last_seen": _now(),
-                    "intent": None,          # 按钮种下的话题,例如 "odm";只有一个值
+                    "last_seen": _now(),     # 相当于 updated_at:每次活动刷新,TTL/LRU 都看它
+                    "intent": None,          # 按钮种下的话题(如 "odm");只有一个值;None = 自由聊/其它
                     "lead": {},              # 线索:边聊边回填的"一条"记录(不是每轮一条)
                     "turns": [],             # 逐句对话:每说一句 append 一条,有上限
-                    "slack_thread_ts": None, # 这通对话在 Slack 里那条 thread 的根消息 ID
+                    "slack_thread_ts": None, # 这通对话在 Slack 那条 thread 的根消息 ID(不是时间!)
                     "meta": meta or {},      # 附加信息:来源页面、语言等
                 }
                 self._data[sid] = s
-                # 新增后可能超出全局上限,顺手淘汰最久没用的
-                self._evict_over_cap_locked()
+                self._evict_over_cap_locked()   # 新增后可能超全局上限,顺手淘汰最久没用的
             else:
-                # 已存在:刷新活跃时间,并标记为"最近使用"(挪到末尾,LRU 用)
                 s["last_seen"] = _now()
-                self._data.move_to_end(sid)
+                self._data.move_to_end(sid)     # 标记为"最近使用"(挪到末尾,LRU 用)
             return s
 
     def touch(self, sid):
-        """只刷新活跃时间(比如用户点了个跳转按钮,没产生对话,但人还在)。"""
+        """只刷新活跃时间(比如用户点了跳转按钮,没产生对话,但人还在)。"""
         with self._lock:
             s = self._data.get(sid)
             if s:
@@ -86,30 +101,29 @@ class SessionStore:
     # ======================== 写入 ========================
     def set_intent(self, sid, intent):
         """
-        种下话题意图。规则:第一个话题按钮说了算,后面不覆盖。
+        种下话题意图。规则:第一个话题按钮说了算,后面不覆盖(防聊着聊着主题被改乱)。
 
-        例:用户先点了 [🏭 ODM] → intent="odm"。
-            后面就算又触发了别的话题,也不把 "odm" 冲掉——避免聊着聊着主题被改乱。
+        例:用户先点 [🏭 ODM] → intent="odm";之后即使又触发别的话题,也不把 "odm" 冲掉。
         """
         with self._lock:
             s = self._data.get(sid)
-            if s and not s["intent"]:      # 只有当前为空才写
+            if s and not s["intent"]:
                 s["intent"] = intent
 
     def append_turn(self, sid, role, text):
         """
         追加一轮对话(role = "user" 或 "assistant")。
+        【改动②】每条 turn 只存 {role, text},不再存没用到的时间戳 ts。
 
-        【单会话轮数上限——第 1 道闸门】
-        只保留最新的 MAX_TURNS 轮,更早的已经在 Slack 里归档过了,内存里可以丢。
-        例:MAX_TURNS=4,已有 [m0,m1,m2,m3],又来一句 m4 →
-            append 后变成 [m0,m1,m2,m3,m4](5 条)→ 超了 → 裁掉最旧的,留 [m1,m2,m3,m4]。
+        【闸门①:单会话轮数上限】只留最新 MAX_TURNS 轮,更早的已在 Slack 归档,内存里可丢。
+        例:MAX_TURNS=4,已有 [m0,m1,m2,m3],又来 m4 →
+            append 后 [m0,m1,m2,m3,m4](5 条)→ 超了 → 裁成 [m1,m2,m3,m4]。
         """
         with self._lock:
             s = self._data.get(sid)
             if not s:
                 return
-            s["turns"].append({"role": role, "text": text, "ts": _now()})
+            s["turns"].append({"role": role, "text": text})
             if len(s["turns"]) > MAX_TURNS:
                 s["turns"] = s["turns"][-MAX_TURNS:]   # 只留末尾(最新)MAX_TURNS 条
             s["last_seen"] = _now()
@@ -117,15 +131,16 @@ class SessionStore:
 
     def update_lead(self, sid, fields):
         """
-        把新识别到的线索字段合并进"那一条" lead 记录,并重新计算还缺什么(missing)。
+        把新识别到的线索字段合并进"那一条" lead 记录,并重算 missing(还缺什么)。
 
-        【关键:lead 是一条记录、不断回填,不是每轮存一条】
-        例:
-          初始    lead = {}
-          第1句后 update_lead(需求)     → lead = {need:"录音麦"}
-          第2句后 update_lead(数量+邮箱) → lead = {need:"录音麦", email:"a@x.com"}
-          每次都往同一条里 merge,空值不覆盖已有值。
-        missing 逻辑:必须有 name;email 和 phone 至少有一个(算"有联系方式")。
+        【关键1:lead 是一条记录、不断回填,不是每轮一条】
+          初始    lead={} → 第1句 update_lead({need:"录音麦"}) → {need:"录音麦"}
+          第2句 update_lead({email:"a@x.com"}) → {need:"录音麦", email:"a@x.com"}
+        【关键2:非空才覆盖,空值不冲掉已有】所以支持"纠错"——
+          用户先说 a@x.com,后说"写错了是 b@y.com" → LLM 提取新邮箱(非空)→ 覆盖成 b@y.com;
+          某轮没提邮箱(提取为空)→ 跳过,不会把已存的 b@y.com 抹掉。
+        【关键3(改动③):email/phone 写入前先校验格式】不合格就不写(代码兜底,不只信 prompt)。
+          例:LLM 误把 "gmac" 当邮箱 → _valid_email 判 False → 不写 → missing 里仍标 contact → bot 继续追问。
         """
         with self._lock:
             s = self._data.get(sid)
@@ -133,15 +148,21 @@ class SessionStore:
                 return
             for k in _LEAD_FIELDS:
                 v = fields.get(k)
-                if v:                       # 只合并非空字段,不用空值把已有的冲掉
-                    s["lead"][k] = v
-            # 重新算"还缺哪些关键信息",供 bot 决定要不要追问
+                if not v:
+                    continue                       # 空值跳过(保护已有值,支持纠错)
+                if k == "email" and not _valid_email(v):
+                    continue                       # 邮箱格式不对,不写
+                if k == "phone" and not _valid_phone(v):
+                    continue                       # 电话位数不对,不写
+                s["lead"][k] = v                   # 非空且合格 → 覆盖写入(取最新一次)
+            # 重算"还缺哪些必须信息"。注意:只追【姓名】+【一种联系方式】;
+            # company/need 是"有就记、没有不追"的加分项,故不进 missing(回答你 review 的 Q8)。
             has_contact = bool(s["lead"].get("email") or s["lead"].get("phone"))
             missing = []
             if not s["lead"].get("name"):
-                missing.append("name")      # 缺姓名
+                missing.append("name")
             if not has_contact:
-                missing.append("contact")   # 缺联系方式
+                missing.append("contact")
             s["lead"]["missing"] = missing
 
     def set_slack_ts(self, sid, ts):
@@ -156,10 +177,9 @@ class SessionStore:
         """
         取"最近 n 轮"喂给大模型(滑动窗口)。
 
-        【为什么不喂全部历史】
-        每轮都把整段对话发给模型,会越聊越贵、越慢。所以只带最近 n 轮;
-        被丢掉的老对话 Slack 里都有,而关键事实(intent/lead)另外单独存着,不会丢。
-        例:HISTORY_TURNS=8,对话有 30 轮 → 只取最后 8 轮发给模型。
+        为什么不喂全部:每轮都带整段历史会越聊越贵越慢。只带最近 n 轮;
+        丢掉的老对话 Slack 里有,关键事实(intent/lead)另存,不会丢。
+        例:HISTORY_TURNS=8,对话 30 轮 → 只取最后 8 轮发给模型。
         """
         n = n or HISTORY_TURNS
         with self._lock:
@@ -180,21 +200,20 @@ class SessionStore:
     # ======================== 淘汰 ========================
     def _evict_over_cap_locked(self):
         """
-        【全局数量上限 + LRU——第 3 道闸门】(注意:调用方已持锁)
+        【闸门③:全局数量上限 + LRU】(调用方已持锁)
         活跃会话超过 MAX_SESSIONS 时,从头部(最久没动的)一直删到不超标。
-        例:上限=500,现在第 501 个进来 → 删掉最久没人说话的那 1 个。
+        例:上限=500,第 501 个进来 → 删掉最久没人说话的那 1 个(它只是数据,不是线程,删了不影响别人)。
         """
         while len(self._data) > MAX_SESSIONS:
-            self._data.popitem(last=False)   # last=False 删的是最旧的
+            self._data.popitem(last=False)     # last=False 删最旧的
 
     def sweep_expired(self):
         """
-        【TTL 超时清理——第 2 道闸门】
-        把闲置超过 TTL_SECONDS 的会话删掉。由后台线程定时调用。删了不丢数据(Slack 有归档)。
-        例:TTL=1800(30分钟),某会话 last_seen 是 40 分钟前 → 判定过期 → 删除。
-        返回这次清理掉的数量。
+        【闸门②:TTL 超时清理】把闲置超过 TTL_SECONDS 的会话删掉。由后台协程定时调用。
+        删了不丢数据(Slack 有归档)。返回这次清理掉的数量。
+        例:TTL=1800(30分钟),某会话 last_seen 是 40 分钟前 → 判过期 → 删除。
         """
-        cutoff = _now() - TTL_SECONDS       # 早于这个时间点算过期
+        cutoff = _now() - TTL_SECONDS
         with self._lock:
             dead = [sid for sid, s in self._data.items() if s["last_seen"] < cutoff]
             for sid in dead:
@@ -206,20 +225,18 @@ class SessionStore:
 STORE = SessionStore()
 
 
-def start_sweeper(interval=300):
+async def run_sweeper(interval=300):
     """
-    启动后台 TTL 清理线程(每 interval 秒扫一次),生产环境只调一次。
+    后台 TTL 清理协程(async 版):每 interval 秒扫一次过期会话。
+    由 app 启动时用 asyncio.create_task 拉起。
 
-    ⚠️ 千万别在 Flask 的 debug 重载模式下启动:重载器会杀掉后台线程
-       (踩过的坑,见记忆 feedback_flask-debug-threads)。app.py 里已做判断。
+    用协程而不是线程的好处:跑在同一个事件循环里,不会被 debug/重载器杀掉
+    (回避了之前 Flask 线程被杀的坑,见记忆 feedback_flask-debug-threads)。
+    例:每 5 分钟醒一次 → 把 30 分钟没人理的会话从内存清掉。
     """
-    def _loop():
-        while True:
-            time.sleep(interval)
-            try:
-                STORE.sweep_expired()
-            except Exception:
-                pass  # 清理线程绝不能因为一次异常就把自己搞挂
-    t = threading.Thread(target=_loop, name="session-sweeper", daemon=True)
-    t.start()
-    return t
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            STORE.sweep_expired()
+        except Exception:
+            pass   # 清理协程绝不能因一次异常把自己搞挂

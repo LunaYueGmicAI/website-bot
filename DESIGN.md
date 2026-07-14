@@ -98,9 +98,11 @@ widget ──POST /voice {sid,audio}──► backend: Groq STT → append turn
 ```
 
 ## How one bot serves many users
-One server process, one dict keyed by `session_id`. Each user's messages route to their own
-entry — never mix. MVP: gunicorn **single worker** + in-memory dict (multi-worker would split
-the dict → session loss; add Redis/sqlite or sticky sessions only when scaling).
+One async process, one dict keyed by `session_id`. Each user's messages route to their own
+entry — never mix. A single async process handles many concurrent conversations because each
+request spends its time `await`-ing external APIs (STT/LLM/Slack). Keep it **single process**
+so the in-memory dict stays authoritative (multi-process would split it → session loss; add
+Redis/sqlite only when scaling out).
 
 ## Language (multilingual, English default)
 - Voice: Groq Whisper auto-detects language (`language=None`) → transcribes in whatever the
@@ -110,10 +112,12 @@ the dict → session loss; add Redis/sqlite or sticky sessions only when scaling
   in English; code comments are Chinese; the seed `widget.json` UI copy is English.
 
 ## Stack
-- Backend: Flask on EC2, reverse-proxied via Cloudflare Tunnel to a stable subdomain
-  (EC2 IP changes on restart — never point the widget at a raw IP). CORS restricted to gmic.ai.
-- STT: Groq Whisper (`whisper-large-v3`).
-- LLM: OpenAI (swappable) — reply + structured lead extraction.
+- Backend: **FastAPI (async)** on EC2, reverse-proxied via Cloudflare Tunnel to a stable
+  subdomain (EC2 IP changes on restart — never point the widget at a raw IP). CORS restricted
+  to gmic.ai. Async fits this I/O-bound workload (STT/LLM/Slack are all network waits) and a
+  single async process keeps the in-memory session dict valid (no multi-worker split).
+- STT: Groq Whisper (`whisper-large-v3`), async client.
+- LLM: OpenAI (swappable) — reply + structured lead extraction, async client.
 - Slack: `slack_sdk` bot token (chat:write, files:write).
 - Config: `config/widget.json` — buttons + FAQ as data the team edits without code.
 

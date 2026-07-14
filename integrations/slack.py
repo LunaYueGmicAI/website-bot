@@ -1,10 +1,11 @@
 """
-Slack 转发:一个频道,每通对话一个 thread。
+Slack 转发(异步):一个频道,每通对话一个 thread。
 
-- 线索卡 = thread 的根消息,用 chat.update(ts) 实时回填(第一次发的时候把根消息 ID 存进会话)。
-- 明细    = thread 里的回复:语音发"原始音频文件 + 转写";文字发文字。
+- 线索卡 = thread 的根消息,用 chat.update(ts) 实时回填(第一次发时把根消息 ID 存进会话)。
+- 明细    = thread 里的回复:语音发"原始音频 + 转写";文字发文字。
 
 若没配 SLACK_BOT_TOKEN(P0 之前),所有函数直接空转,好让其余流程在本地照常跑。
+卡片文案给内部团队看,统一英文(与默认语言一致)。
 """
 import os
 
@@ -12,14 +13,14 @@ _client = None
 
 
 def _client_lazy():
-    # 懒加载 Slack 客户端;没 token 就返回 None(调用方会因此空转)。
+    # 懒加载 Slack 异步客户端;没 token 就返回 None(调用方因此空转)。
     global _client
     if _client is None:
         token = os.getenv("SLACK_BOT_TOKEN")
         if not token:
             return None
-        from slack_sdk import WebClient
-        _client = WebClient(token=token)
+        from slack_sdk.web.async_client import AsyncWebClient
+        _client = AsyncWebClient(token=token)
     return _client
 
 
@@ -29,15 +30,13 @@ def _channel():
 
 def _card_text(session):
     """
-    把会话渲染成"线索卡"的文本。每次 lead/intent 变了,就用这个重新生成、覆盖那张卡。
-
-    例:lead={email:"a@x.com", need:"录音麦", missing:["name"]}, intent="odm" →
-        一张列着 意图/联系/姓名/需求/来源/待补 的卡片文本。
+    把会话渲染成"线索卡"文本。每次 lead/intent 变了,就用这个重新生成、覆盖那张卡。
+    例:lead={email:"a@x.com", need:"recorder", missing:["name"]}, intent="odm" →
+        一张列着 Intent/Contact/Name/Need/Source/Missing 的卡片文本。
     """
     lead = session.get("lead") or {}
     intent = session.get("intent") or "—"
     contact = lead.get("email") or lead.get("phone")
-    # 卡片是给内部团队看的通知,统一用英文(与默认语言一致)
     parts = [
         "*🆕 New GMIC website inquiry*",
         f"• Intent: {intent}",
@@ -51,44 +50,44 @@ def _card_text(session):
     return "\n".join(parts)
 
 
-def ensure_card(store, sid):
+async def ensure_card(store, sid):
     """
-    确保这通对话在 Slack 有一张"线索卡"(thread 根消息);没有就新建。
+    确保这通对话在 Slack 有一张"线索卡"(thread 根消息);没有就新建(异步)。
 
-    关键:第一次发消息时,Slack 会返回这条消息的 ID(ts)。我们把 ts 存进会话,
-    之后所有更新(chat.update)和明细回复(thread_ts)都靠它精准定位到这张卡/这个 thread。
-    例:用户点 ODM 首次触发 → 这里发一张卡 → Slack 返回 ts="169...01" → 存进 session。
+    关键:第一次发消息时 Slack 返回该消息的 ID(ts)。把 ts 存进会话,
+    之后所有更新(chat.update)和明细回复(thread_ts)都靠它定位到这张卡/这个 thread。
+    例:用户点 ODM 首次触发 → 发一张卡 → Slack 返回 ts="169...01" → 存进 session;
+        下次不会重复建卡。
     """
     session = store.snapshot(sid)
     if not session:
         return None
-    if session.get("slack_thread_ts"):        # 已经有卡了,不重复建
+    if session.get("slack_thread_ts"):        # 已有卡,不重复建
         return session["slack_thread_ts"]
     c = _client_lazy()
     if not c:
         return None
-    resp = c.chat_postMessage(channel=_channel(), text=_card_text(session))
+    resp = await c.chat_postMessage(channel=_channel(), text=_card_text(session))
     ts = resp["ts"]
     store.set_slack_ts(sid, ts)               # 记住根消息 ID
     return ts
 
 
-def update_card(store, sid):
-    """就地刷新线索卡:用存好的根消息 ts 调 chat.update,把卡改成最新状态(实时回填)。"""
+async def update_card(store, sid):
+    """就地刷新线索卡:用存好的根消息 ts 调 chat.update,把卡改成最新状态(实时回填,异步)。"""
     session = store.snapshot(sid)
     c = _client_lazy()
     if not c or not session or not session.get("slack_thread_ts"):
         return
-    c.chat_update(channel=_channel(), ts=session["slack_thread_ts"], text=_card_text(session))
+    await c.chat_update(channel=_channel(), ts=session["slack_thread_ts"], text=_card_text(session))
 
 
-def post_detail(store, sid, text, audio_bytes=None, filename="voice.webm"):
+async def post_detail(store, sid, text, audio_bytes=None, filename="voice.webm"):
     """
-    往 thread 里发一条明细回复。若带了 audio_bytes,就把原始录音也传上去。
-
+    往 thread 里发一条明细回复(异步)。若带 audio_bytes,就把原始录音也传上去。
     例:
-      文字轮 → post_detail(text="👤 你们支持防水吗")            → 一条文字回复
-      语音轮 → post_detail(text="🎤 我想做2000个", audio_bytes=…) → 音频文件 + 转写一起挂到 thread
+      文字轮 → post_detail(text="👤 你们支持防水吗")             → 一条文字回复
+      语音轮 → post_detail(text="🎤 我想做2000个", audio_bytes=…) → 原始音频 + 转写一起挂到 thread
     """
     session = store.snapshot(sid)
     c = _client_lazy()
@@ -96,12 +95,12 @@ def post_detail(store, sid, text, audio_bytes=None, filename="voice.webm"):
         return
     ts = session.get("slack_thread_ts")
     if audio_bytes:
-        # 语音:上传原始音频文件,顺带把转写文字作为文件的说明发出去
-        c.files_upload_v2(
+        # 语音:上传原始音频,顺带把转写文字作为文件说明发出去
+        await c.files_upload_v2(
             channel=_channel(), thread_ts=ts,
             filename=filename, content=audio_bytes,
             initial_comment=text,
         )
     else:
         # 文字:直接发一条 thread 回复
-        c.chat_postMessage(channel=_channel(), thread_ts=ts, text=text)
+        await c.chat_postMessage(channel=_channel(), thread_ts=ts, text=text)
