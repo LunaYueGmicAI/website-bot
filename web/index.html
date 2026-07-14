@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>GMIC AI — Chat</title>
+<style>
+  /* ============================================================
+     GMIC 网站咨询 widget —— 单文件自包含(内联 CSS/JS),做成 iframe 独立页。
+     iframe 内 origin = 后端域,fetch /chat /event 属同源,不依赖 CORS。
+     定位:多语言"询盘 intake + 导览 + 直接联系我们"。语音=聊天里的听写输入(P3 第二步接)。
+     布局(从上到下):头部(标题+可选邮箱框) / 消息区(问候+快捷按钮列+对话) / 固定联系条 / 输入栏。
+     ============================================================ */
+  :root {
+    --accent: #4f46e5;          /* 主色:靛蓝 */
+    --accent-ink: #ffffff;
+    --bg: #ffffff;
+    --panel: #f5f6f9;
+    --bubble-bot: #eef0f6;
+    --bubble-user: var(--accent);
+    --text: #1f2430;
+    --muted: #7a8194;
+    --border: #e3e6ef;
+    --radius: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161c; --panel: #1b1e26; --bubble-bot: #232733; --text: #eceef4;
+      --muted: #9aa2b4; --border: #2a2f3b;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: transparent; color: var(--text); }
+
+  /* 整个 widget = 一张带边框/圆角/阴影的卡片(Q7:给聊天框加边线) */
+  #app {
+    display: flex; flex-direction: column;
+    height: 100vh; max-width: 440px; margin: 0 auto;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: 0 10px 40px rgba(20, 22, 30, .12);
+    overflow: hidden;
+  }
+
+  /* ---- 头部:只放标题 ---- */
+  header { padding: 13px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
+  header .title { font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; }
+
+  /* ---- 邮箱捕获条(Q6:移到输入栏上方、放大醒目)+ Save 按钮 ---- */
+  .email-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; border-top: 1px solid var(--border); background: var(--panel); }
+  .email-bar .ic { font-size: 15px; }
+  .email-bar input { flex: 1; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);
+    font-size: 13.5px; padding: 10px 12px; outline: none; }
+  .email-bar input:focus { border-color: var(--accent); }
+  .email-bar button { flex: 0 0 auto; border: none; background: var(--accent); color: var(--accent-ink);
+    font-size: 13px; font-weight: 600; padding: 10px 16px; border-radius: 10px; cursor: pointer; }
+  .email-bar button:disabled { opacity: .4; cursor: default; }
+  .email-status { font-size: 11px; color: var(--muted); padding: 0 14px; min-height: 0; transition: min-height .1s; }
+  .email-status.show { min-height: 16px; padding: 2px 14px 4px; }
+  .email-status.ok { color: #2ecc71; }
+
+  /* ---- 消息区 ---- */
+  #messages { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 84%; padding: 9px 12px; border-radius: var(--radius); font-size: 14px; line-height: 1.45;
+    white-space: pre-wrap; word-wrap: break-word; }
+  .msg.bot  { align-self: flex-start; background: var(--bubble-bot); color: var(--text); border-bottom-left-radius: 5px; }
+  .msg.user { align-self: flex-end;   background: var(--bubble-user); color: var(--accent-ink); border-bottom-right-radius: 5px; }
+  .msg a { color: inherit; text-decoration: underline; }
+  .learn-more { display: inline-block; margin-top: 6px; font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--accent); text-decoration: none; }
+  .qr-img { display: block; margin-top: 8px; width: 168px; max-width: 100%; border-radius: 10px; border: 1px solid var(--border); }
+
+  /* Q3/Q5:快捷按钮做成 greeting 下的【一列】、更醒目;常驻可反复点 */
+  .quick-col { display: flex; flex-direction: column; gap: 8px; align-self: stretch; margin: 2px 0 4px; }
+  .quick-col .q-btn {
+    text-align: left; font-size: 14px; font-weight: 550; padding: 12px 14px; border-radius: 13px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; transition: .12s;
+  }
+  .quick-col .q-btn:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
+
+  /* FAQ 展开的问题 chips */
+  .faq-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chip { font-size: 13px; padding: 7px 11px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); cursor: pointer; }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* 输入中三点 */
+  .typing { align-self: flex-start; display: flex; gap: 4px; padding: 11px 13px; background: var(--bubble-bot); border-radius: var(--radius); }
+  .typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite both; }
+  .typing span:nth-child(2) { animation-delay: .2s; } .typing span:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
+
+  /* ---- Q2/Q5:固定"直接联系我们"条(复制官网联系方式组,醒目、不随对话滚动)---- */
+  .contacts { border-top: 1px solid var(--border); background: var(--panel); padding: 8px 10px; }
+  .contacts .lbl { font-size: 10.5px; letter-spacing: .3px; text-transform: uppercase; color: var(--muted); margin: 0 2px 6px; }
+  .contacts .row { display: flex; gap: 6px; overflow-x: auto; justify-content: center; }
+  .contacts .c-btn { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    min-width: 58px; padding: 7px 6px; border-radius: 11px; border: 1px solid var(--border); background: var(--bg);
+    color: var(--text); text-decoration: none; font-size: 11px; cursor: pointer; }
+  .contacts .c-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .contacts .c-btn .ic { font-size: 18px; }
+
+  /* ---- 输入栏:文字 + 麦克风(占位) + 发送 ---- */
+  footer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--bg); }
+  #text { flex: 1; resize: none; max-height: 120px; padding: 10px 12px; font-size: 14px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text); outline: none; }
+  #text:focus { border-color: var(--accent); }
+  .icon-btn { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer; font-size: 17px; display: grid; place-items: center; }
+  #send { background: var(--accent); color: var(--accent-ink); }
+  #send:disabled { opacity: .4; cursor: default; }
+  #mic { background: var(--panel); color: var(--muted); border: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title"><span class="dot"></span> GMIC AI Assistant</div>
+  </header>
+
+  <div id="messages" aria-live="polite"></div>
+
+  <div class="contacts" id="contacts" hidden>
+    <div class="lbl">Reach us directly</div>
+    <div class="row" id="contactRow"></div>
+  </div>
+
+  <!-- 邮箱捕获:移到输入栏上方,更醒目 + [Save] 确认按钮(点了立刻走 /lead 存进 lead) -->
+  <div class="email-bar">
+    <span class="ic">✉️</span>
+    <input type="email" id="email" placeholder="Your email — so our team can follow up" autocomplete="email" />
+    <button id="emailSave" disabled>Save</button>
+  </div>
+  <div class="email-status" id="emailStatus"></div>
+
+  <footer>
+    <textarea id="text" rows="1" placeholder="Type your message…"></textarea>
+    <button class="icon-btn" id="mic" title="Voice — coming soon" disabled>🎤</button>
+    <button class="icon-btn" id="send" title="Send" disabled>➤</button>
+  </footer>
+</div>
+
+<script>
+/* ============================================================
+   前端逻辑。后端入口:GET /config、POST /event(topic/faq/link)、POST /chat。
+   API 走相对路径(同源);如需指向别的后端可设 window.GMIC_BOT_API。
+   ============================================================ */
+const API = (window.GMIC_BOT_API || "").replace(/\/$/, "");
+const $ = (id) => document.getElementById(id);
+const messagesEl = $("messages"), textEl = $("text"), sendBtn = $("send");
+const emailEl = $("email"), emailStatus = $("emailStatus"), emailSaveBtn = $("emailSave");
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+// 会话身份:存 localStorage,刷新/重开页面仍是同一通对话(和后端 session_id 对齐)
+const SID_KEY = "gmic_bot_sid";
+let sessionId = localStorage.getItem(SID_KEY);
+if (!sessionId) {
+  sessionId = "sess_" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "_" + Math.floor(Math.random() * 1e6));
+  localStorage.setItem(SID_KEY, sessionId);
+}
+
+let CONFIG = null;
+let busy = false;   // 一次只允许一个在途请求,防连点
+
+async function postJSON(path, body) {
+  const res = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(path + " -> " + res.status);
+  return res.json();
+}
+function scrollDown() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+// role: "bot" | "user"
+// opts.link = FAQ "了解更多"链接(文案固定 Learn more →)
+// opts.action = {url, label} 通用打开按钮(联系方式用:打开 WhatsApp / 拨号 / 写邮件…)
+// opts.qr = 微信二维码图
+function addBubble(role, text, opts = {}) {
+  const el = document.createElement("div");
+  el.className = "msg " + role;
+  el.textContent = text;
+  if (opts.link) {
+    const a = document.createElement("a");
+    a.className = "learn-more"; a.href = opts.link; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = "Learn more →";
+    el.appendChild(document.createElement("br")); el.appendChild(a);
+  }
+  if (opts.action && opts.action.url) {
+    const a = document.createElement("a");
+    a.className = "learn-more"; a.href = opts.action.url; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = opts.action.label || "Open →";
+    el.appendChild(document.createElement("br")); el.appendChild(a);
+  }
+  if (opts.qr) {
+    const img = document.createElement("img");
+    img.className = "qr-img"; img.src = opts.qr; img.alt = "WeChat QR";
+    el.appendChild(img);
+  }
+  messagesEl.appendChild(el); scrollDown();
+  return el;
+}
+
+function showTyping() {
+  const el = document.createElement("div");
+  el.className = "typing"; el.innerHTML = "<span></span><span></span><span></span>";
+  messagesEl.appendChild(el); scrollDown();
+  return () => el.remove();
+}
+
+// greeting 下面的【快捷按钮列】(Q3:常驻;每次都新渲染一组,反复可点)
+function renderQuickColumn() {
+  const col = document.createElement("div");
+  col.className = "quick-col";
+  for (const a of CONFIG.quickActions || []) {
+    const btn = document.createElement("button");
+    btn.className = "q-btn"; btn.textContent = a.label;
+    btn.onclick = () => onQuickAction(a);
+    col.appendChild(btn);
+  }
+  messagesEl.appendChild(col); scrollDown();
+}
+
+async function onQuickAction(a) {
+  if (busy) return;
+  if (a.type === "link") {
+    if (a.url && !a.url.startsWith("TODO")) window.open(a.url, "_blank", "noopener");
+    postJSON("/event", { session_id: sessionId, action: "link", id: a.id }).catch(() => {});
+    return;
+  }
+  if (a.type === "topic") {
+    setBusy(true); const stop = showTyping();
+    try { const r = await postJSON("/event", { session_id: sessionId, action: "topic", id: a.id });
+      stop(); if (r.reply) addBubble("bot", r.reply);
+    } catch (e) { stop(); addBubble("bot", "Sorry, something went wrong. Please try again."); }
+    setBusy(false); return;
+  }
+  if (a.type === "faq") renderFaqChips();
+}
+
+function renderFaqChips() {
+  const wrap = addBubble("bot", "Pick a question:");
+  const row = document.createElement("div"); row.className = "faq-chips";
+  (CONFIG.faq || []).forEach((item, i) => {
+    const c = document.createElement("button");
+    c.className = "chip"; c.textContent = item.q;
+    c.onclick = () => onFaq(i, item.q);
+    row.appendChild(c);
+  });
+  wrap.appendChild(row); scrollDown();
+}
+
+async function onFaq(index, question) {
+  if (busy) return;
+  addBubble("user", question);
+  setBusy(true); const stop = showTyping();
+  try { const r = await postJSON("/event", { session_id: sessionId, action: "faq", index });
+    stop(); addBubble("bot", r.reply, { link: r.link });
+  } catch (e) { stop(); addBubble("bot", "Sorry, something went wrong. Please try again."); }
+  setBusy(false);
+}
+
+// Q2/Q5:渲染固定"直接联系我们"条(数据来自 /config 的 contacts)。
+// 统一交互:点任一按钮 → 在聊天里弹一个气泡,显示【具体信息】(邮箱/电话/链接/二维码)+ 打开按钮。
+// 好处:邮箱/电话不依赖本机 mailto/tel 处理器也能看到并复制;每次点击都有可见反馈,和 WeChat 一致。
+function renderContacts() {
+  const list = CONFIG.contacts || [];
+  const row = $("contactRow");
+  // ⚡ 快捷动作:放进这一栏最前面(点了把那列按钮弹到对话底部,随时可召唤)
+  const q = document.createElement("button");
+  q.className = "c-btn";
+  q.innerHTML = `<span class="ic">⚡</span>Quick`;
+  q.onclick = renderQuickColumn;
+  row.appendChild(q);
+  // 联系方式按钮
+  for (const c of list) {
+    const btn = document.createElement("button");
+    btn.className = "c-btn";
+    btn.innerHTML = `<span class="ic">${c.icon || "•"}</span>${c.label}`;
+    btn.onclick = () => onContactClick(c);
+    row.appendChild(btn);
+  }
+  $("contacts").hidden = false;
+}
+
+function onContactClick(c) {
+  if (c.type === "qr") {
+    // 微信:把二维码贴进对话
+    addBubble("bot", c.value || "Scan to add us on WeChat:", { qr: c.qr });
+  } else {
+    // 其余:气泡显示具体值(可复制)+ 一个打开按钮(mailto/tel/深链)
+    addBubble("bot", `${c.label}: ${c.value || ""}`, { action: { url: c.url, label: c.open_label } });
+  }
+}
+
+// ---- 打字消息闭环 ----
+async function sendText() {
+  const text = textEl.value.trim();
+  if (!text || busy) return;
+  addBubble("user", text);
+  textEl.value = ""; autosize();
+  setBusy(true); const stop = showTyping();
+  try {
+    const body = { session_id: sessionId, text, page_url: document.referrer || location.href };
+    const email = emailEl.value.trim();
+    if (email) body.email = email;   // 邮箱框填了就带上(后端校验后入 lead)
+    const r = await postJSON("/chat", body);
+    stop(); addBubble("bot", r.reply || "…");
+  } catch (e) { stop(); addBubble("bot", "Sorry, I'm having trouble right now — please try again in a moment."); }
+  setBusy(false);
+}
+
+function setBusy(v) { busy = v; sendBtn.disabled = v || !textEl.value.trim(); }
+function autosize() { textEl.style.height = "auto"; textEl.style.height = Math.min(textEl.scrollHeight, 120) + "px"; sendBtn.disabled = busy || !textEl.value.trim(); }
+
+// ---- 邮箱框:输入即调 Save 可用态;点 Save → /lead 立刻入库 ----
+function setEmailStatus(msg, ok) {
+  emailStatus.textContent = msg || "";
+  emailStatus.className = "email-status" + (msg ? " show" : "") + (ok ? " ok" : "");
+}
+function onEmailInput() {
+  // 只有像邮箱才让 Save 可点(轻校验;真正校验在后端)
+  emailSaveBtn.disabled = !EMAIL_RE.test(emailEl.value.trim());
+}
+async function saveEmail() {
+  const v = emailEl.value.trim();
+  if (!v) return;
+  emailSaveBtn.disabled = true;
+  try {
+    const r = await postJSON("/lead", { session_id: sessionId, email: v, page_url: document.referrer || location.href });
+    // 后端回执里 saved.email 有值 = 真存进去了;没有 = 格式没过后端校验
+    if (r.saved && r.saved.email) setEmailStatus("Saved ✓ — we'll follow up here.", true);
+    else setEmailStatus("Hmm, that email looks off — mind checking it?", false);
+  } catch (e) {
+    setEmailStatus("Couldn't save just now — please try again.", false);
+  }
+  onEmailInput();   // 恢复按钮可用态
+}
+
+textEl.addEventListener("input", autosize);
+textEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); } });
+sendBtn.addEventListener("click", sendText);
+emailEl.addEventListener("input", onEmailInput);
+emailSaveBtn.addEventListener("click", saveEmail);
+
+// ---- 启动:拉配置 → 问候语 + 快捷按钮列 + 联系条 ----
+(async function init() {
+  try { CONFIG = await (await fetch(API + "/config")).json(); }
+  catch (e) { CONFIG = { greeting: "Hi 👋 How can we help?", quickActions: [], faq: [], contacts: [] }; }
+  addBubble("bot", CONFIG.greeting || "Hi 👋 How can we help?");
+  renderQuickColumn();
+  renderContacts();
+})();
+</script>
+</body>
+</html>

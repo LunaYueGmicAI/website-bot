@@ -56,6 +56,19 @@ class ChatReq(BaseModel):
     text: str
     page_url: str | None = None
     lang: str | None = None
+    # widget 那个"可选邮箱框"填了就带上来(搭车在聊天里)。前端只做轻校验,真正的格式校验在
+    # update_lead 里(不合格不写),所以这里放心收。为空/不带 = 用户没填,不影响。
+    email: str | None = None
+
+
+class LeadReq(BaseModel):
+    # widget 邮箱框的 [Save] 按钮走这:不发聊天也能【立刻】把联系方式存进 lead。
+    # 例:{"session_id":"sess_ab12","email":"buyer@acme.com"}
+    session_id: str
+    email: str | None = None
+    name: str | None = None
+    phone: str | None = None
+    page_url: str | None = None
 
 
 # ======================== 小工具 ========================
@@ -168,6 +181,10 @@ async def chat(req: ChatReq):
 
     # 1) 确保会话存在(首次打字就在这建会话,并记下来源页 page_url、语言 lang 进 meta)
     STORE.get_or_create(req.session_id, {"page_url": req.page_url, "lang": req.lang})
+    # 1b) 邮箱框填了就直接记进 lead(不经过大模型抽取);update_lead 内部会校验格式,不合格自动不写。
+    #     这是"追问 + 邮箱框"双保险里的邮箱框那一路:用户懒得在对话里说,填个框也能留下联系方式。
+    if req.email:
+        STORE.update_lead(req.session_id, {"email": req.email})
     # 2) 把用户这句记进对话(turns),后续滑动窗口喂给模型时能带上
     STORE.append_turn(req.session_id, "user", text)
     # 3) 确保 Slack 有这通对话的线索卡(没有就建,根消息 ts 存进会话)
@@ -182,6 +199,28 @@ async def chat(req: ChatReq):
     # 7) 刷新线索卡:这轮可能抽到了新 lead(邮箱/need 等),把卡更新成最新状态
     await slack.update_card(STORE, req.session_id)
     return {"reply": reply}   # 产出:{"reply": AI 回复} → 前端(P3)取 reply 显示成 bot 气泡
+
+
+@router.post("/lead")
+async def lead(req: LeadReq):
+    """
+    直接提交联系方式(widget 邮箱框的 [Save] 按钮走这)。不经过大模型。
+    解决的坑:邮箱框以前只能"搭车"在下一条聊天里发,用户不聊天就永远收不到 → 这里给一条独立通道。
+    """
+    # 至少要带一个字段,否则没意义 → 400
+    fields = {k: v for k, v in {"email": req.email, "name": req.name, "phone": req.phone}.items() if v}
+    if not fields:
+        raise HTTPException(status_code=400, detail="no lead fields")
+
+    # 确保会话存在 → 合并进 lead(update_lead 内部校验 email/phone 格式,不合格自动不写)→ 刷 Slack 卡
+    STORE.get_or_create(req.session_id, {"page_url": req.page_url})
+    STORE.update_lead(req.session_id, fields)
+    await slack.ensure_card(STORE, req.session_id)
+    await slack.update_card(STORE, req.session_id)
+
+    # 回执:告诉前端每个字段【实际是否存进去了】(校验没过的不会出现),前端据此显示 ✓ 或"邮箱看着不对"
+    saved = STORE.snapshot(req.session_id)["lead"]
+    return {"ok": True, "saved": {k: saved.get(k) for k in fields if saved.get(k)}}
 
 
 @router.post("/voice")

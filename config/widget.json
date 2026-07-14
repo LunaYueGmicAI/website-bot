@@ -18,13 +18,20 @@
       "id": "demo",
       "label": "📅 Book a demo",
       "type": "link",
-      "url": "TODO_CALENDAR_URL"
+      "url": "https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ1Zt7KlkfMyOoHb9-Aydz4eDp3rzzr4Zpzgl3r0aizQHWVL1jbWvGD0xbd24AxJeoyqK-Jn7FDb"
     },
     {
       "id": "faq",
       "label": "❓ FAQ",
       "type": "faq"
     }
+  ],
+  "contacts": [
+    { "id": "whatsapp", "label": "WhatsApp", "icon": "💬", "url": "https://api.whatsapp.com/send/?phone=16699000008", "value": "+1 (669) 900-0008", "open_label": "Open WhatsApp" },
+    { "id": "wechat",   "label": "WeChat",   "icon": "🟢", "type": "qr", "qr": "https://gmic.ai/wp-content/uploads/gmic-site/main/img/wechat-qr.png", "value": "Scan to add us on WeChat" },
+    { "id": "telegram", "label": "Telegram", "icon": "✈️", "url": "https://t.me/gmicai", "value": "@gmicai", "open_label": "Open Telegram" },
+    { "id": "email",    "label": "Email",    "icon": "✉️", "url": "mailto:trigg@gmic.ai", "value": "trigg@gmic.ai", "open_label": "Compose email" },
+    { "id": "call",     "label": "Call",     "icon": "📞", "url": "tel:+16699000008", "value": "+1 (669) 900-0008", "open_label": "Call now" }
   ],
   "faq": [
     {
