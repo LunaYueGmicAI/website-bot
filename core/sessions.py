@@ -27,7 +27,7 @@ from collections import OrderedDict
 TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "1800"))     # 闲置多久算过期(默认 30 分钟)
 MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "500"))           # 全局最多同时保留几个会话
 HISTORY_TURNS = int(os.getenv("LLM_HISTORY_TURNS", "8"))        # 每轮喂给大模型的最近几轮
-# 【改动①】内存里最多留几轮 = 默认等于喂给 LLM 的轮数。
+# 内存里最多留几轮 = 默认等于喂给 LLM 的轮数。
 #   为什么不多留:多出来的既不发给模型、前端也不靠服务器回滚(前端自己存显示副本),
 #   而老对话又已经在 Slack 归档,所以"多留"没有意义。约束:必须 >= HISTORY_TURNS。
 MAX_TURNS = int(os.getenv("MAX_TURNS_IN_MEMORY", str(HISTORY_TURNS)))
@@ -77,7 +77,8 @@ class SessionStore:
                     "id": sid,
                     "created_at": _now(),
                     "last_seen": _now(),     # 相当于 updated_at:每次活动刷新,TTL/LRU 都看它
-                    "intent": None,          # 按钮种下的话题(如 "odm");只有一个值;None = 自由聊/其它
+                    "entry_intent": None,    # 入口意图:进来时点的话题按钮(如 "odm");单值、首次锁定不变;None = 自由聊/其它
+                                             # 注意:这只是"从哪进来"的入口标签;对话中演变的真实诉求看 lead.need
                     "lead": {},              # 线索:边聊边回填的"一条"记录(不是每轮一条)
                     "turns": [],             # 逐句对话:每说一句 append 一条,有上限
                     "slack_thread_ts": None, # 这通对话在 Slack 那条 thread 的根消息 ID(不是时间!)
@@ -99,16 +100,20 @@ class SessionStore:
                 self._data.move_to_end(sid)
 
     # ======================== 写入 ========================
-    def set_intent(self, sid, intent):
+    def set_entry_intent(self, sid, entry_intent):
         """
-        种下话题意图。规则:第一个话题按钮说了算,后面不覆盖(防聊着聊着主题被改乱)。
+        种下"入口意图"(用户进来时点的话题按钮)。规则:第一个话题按钮说了算,后面不覆盖。
 
-        例:用户先点 [🏭 ODM] → intent="odm";之后即使又触发别的话题,也不把 "odm" 冲掉。
+        为什么首次锁定:这个字段记录的是"从哪个入口进来"(投放/转化归因用),是一个确定性的
+        入口信号,不该被后续点击冲掉。而"用户聊着聊着诉求变了"由 lead.need 承接(每轮 LLM 重抽、
+        非空即覆盖),两者分工:entry_intent=从哪进来(不变),need=现在想要什么(随对话演变)。
+
+        例:用户先点 [🏭 ODM] → entry_intent="odm";之后即使又触发别的话题,也不把 "odm" 冲掉。
         """
         with self._lock:
             s = self._data.get(sid)
-            if s and not s["intent"]:
-                s["intent"] = intent
+            if s and not s["entry_intent"]:
+                s["entry_intent"] = entry_intent
 
     def append_turn(self, sid, role, text):
         """
@@ -139,8 +144,13 @@ class SessionStore:
         【关键2:非空才覆盖,空值不冲掉已有】所以支持"纠错"——
           用户先说 a@x.com,后说"写错了是 b@y.com" → LLM 提取新邮箱(非空)→ 覆盖成 b@y.com;
           某轮没提邮箱(提取为空)→ 跳过,不会把已存的 b@y.com 抹掉。
-        【关键3(改动③):email/phone 写入前先校验格式】不合格就不写(代码兜底,不只信 prompt)。
+        【关键3:email/phone 写入前先校验格式】不合格就不写(代码兜底,不只信 prompt)。
           例:LLM 误把 "gmac" 当邮箱 → _valid_email 判 False → 不写 → missing 里仍标 contact → bot 继续追问。
+        【关键4:什么算"必填(required)"→ 只有 need + 一种联系方式】missing 只追这两样;
+          name/company 是"有就记、没有不追"的加分项,不进 missing。这套口径必须和 prompts.py
+          PERSONA 目标 #2 一致(那里教 bot 追什么,这里决定卡片/lead_line 标什么缺),否则两边打架。
+          例:lead={need:"录音麦"} 但没留邮箱/电话 → missing=["contact"] → bot 追"留个邮箱吧";
+              lead={email:"a@x.com"} 但没说想要啥 → missing=["need"] → bot 追"您具体想做什么产品?"。
         """
         with self._lock:
             s = self._data.get(sid)
@@ -155,12 +165,12 @@ class SessionStore:
                 if k == "phone" and not _valid_phone(v):
                     continue                       # 电话位数不对,不写
                 s["lead"][k] = v                   # 非空且合格 → 覆盖写入(取最新一次)
-            # 重算"还缺哪些必须信息"。注意:只追【姓名】+【一种联系方式】;
-            # company/need 是"有就记、没有不追"的加分项,故不进 missing(回答你 review 的 Q8)。
+            # 重算"还缺哪些必填信息"。必填 = 【need(想要什么)】+【一种联系方式(email 优先, phone 也算)】。
+            # name/company 是加分项,给了就记、没有不追,故不进 missing。改这里务必同步 prompts.py PERSONA 目标 #2。
             has_contact = bool(s["lead"].get("email") or s["lead"].get("phone"))
             missing = []
-            if not s["lead"].get("name"):
-                missing.append("name")
+            if not s["lead"].get("need"):
+                missing.append("need")
             if not has_contact:
                 missing.append("contact")
             s["lead"]["missing"] = missing
@@ -178,7 +188,7 @@ class SessionStore:
         取"最近 n 轮"喂给大模型(滑动窗口)。
 
         为什么不喂全部:每轮都带整段历史会越聊越贵越慢。只带最近 n 轮;
-        丢掉的老对话 Slack 里有,关键事实(intent/lead)另存,不会丢。
+        丢掉的老对话 Slack 里有,关键事实(entry_intent/lead)另存,不会丢。
         例:HISTORY_TURNS=8,对话 30 轮 → 只取最后 8 轮发给模型。
         """
         n = n or HISTORY_TURNS

@@ -29,7 +29,7 @@ just an input method (ChatGPT-style mic dictation): record a clip → STT → sa
 ### Quick actions (4) — shortcuts, NOT the site nav
 | Button | Behavior | Type | Seeds into memory | LLM cost |
 |---|---|---|---|---|
-| 🏭 定制/ODM | opens AI chat primed for ODM | topic | `intent="odm"` + context note | yes |
+| 🏭 定制/ODM | opens AI chat primed for ODM | topic | `entry_intent="odm"` + context note | yes |
 | 📦 看产品 | opens /products/ in new tab | link | logs a "viewed products" event | no |
 | 📅 预约演示 | opens calendar in new tab | link | logs a "booking" event | no |
 | ❓ 常见问题 | expands sub-questions → canned answers | faq | appends Q&A to turns (optional) | no |
@@ -42,8 +42,8 @@ talking both land in the **same free AI conversation** (voice just goes through 
 ```
 session[session_id] = {
   created_at, last_seen,                 # for TTL / LRU
-  intent: "odm" | null,                  # seeded by a topic button (single value)
-  lead: {name, email, phone, company, need, missing:[...]},  # ONE record, backfilled
+  entry_intent: "odm" | null,            # ENTRY tag: which topic button they came in via (single value, first-wins)
+  lead: {name, email, phone, company, need, missing:[...]},  # ONE record, backfilled; `need` = evolving intent
   turns: [ {role, text, ts}, ... ],      # append per message (bounded)
   slack_thread_ts,                       # root msg ts of this convo's Slack thread
   meta: {page_url, lang}
@@ -52,8 +52,9 @@ session[session_id] = {
 
 - `session_id` is the master key: (1) RAM dict key, (2) Slack thread owner, (3) frontend
   identity (stored in browser localStorage → survives page reload).
-- `lead` + `intent` = small durable **facts**, merged/overwritten as the chat reveals info
-  (NOT one entry per turn).
+- `lead` + `entry_intent` = small durable **facts**, merged/overwritten as the chat reveals info
+  (NOT one entry per turn). `entry_intent` = where they entered (fixed); `lead.need` = what they
+  want now (evolves each turn) — a mid-chat pivot updates `need`, not `entry_intent`.
 - `turns` = verbose, disposable **history**.
 
 ## Memory management (§Memory)
@@ -64,8 +65,8 @@ session[session_id] = {
   Because Slack has everything, RAM can be trimmed/evicted losslessly.
 
 **Sent to the LLM each turn (bounded prompt):**
-`system prompt + intent + lead summary + last N turns (sliding window)` — NOT full history.
-Trimmed old turns already live in Slack. Facts (intent/lead) survive trimming cheaply.
+`system prompt + entry_intent + lead summary + last N turns (sliding window)` — NOT full history.
+Trimmed old turns already live in Slack. Facts (entry_intent/lead) survive trimming cheaply.
 
 **Four bounds on RAM growth:**
 1. Per-session turn cap (`MAX_TURNS_IN_MEMORY`, keep newest).
@@ -80,7 +81,7 @@ Trimmed old turns already live in Slack. Facts (intent/lead) survive trimming ch
 
 `#gmic-web-voice-leads`:
 - **Thread root = lead card (condensed)**, updated in real time via `chat.update(ts)`
-  (we store the root `ts` on first post). Fields: intent, contact ✅/❌, one-line need,
+  (we store the root `ts` on first post). Fields: entry, contact ✅/❌, one-line need,
   status, source page.
 - **Thread replies = detail:** voice → original audio file + transcript; text → the message.
 - Channel = clean list of lead cards; open a thread to see the full exchange + audio.
@@ -88,9 +89,9 @@ Trimmed old turns already live in Slack. Facts (intent/lead) survive trimming ch
 
 ## Interaction flow (voice turn)
 ```
-widget ──POST /event {sid,intent}──► backend: create session + Slack card(root)→store ts
+widget ──POST /event {sid,entry_intent}─► backend: create session + Slack card(root)→store ts
 widget ──POST /voice {sid,audio}──► backend: Groq STT → append turn
-                                     → LLM(window+intent+lead) → reply + lead update
+                                     → LLM(window+entry_intent+lead) → reply + lead update
                                      → Slack: postMessage(thread: audio+transcript+reply)
                                      → Slack: chat.update(card)
                                      → delete audio blob

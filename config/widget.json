@@ -5,7 +5,7 @@
       "id": "odm",
       "label": "🏭 Custom / ODM",
       "type": "topic",
-      "intent": "odm",
+      "entry_intent": "odm",
       "opener": "We do full ODM/OEM custom hardware — enclosure, firmware, and mass production. Could you tell me roughly what product you have in mind, expected quantity, and your target launch date?"
     },
     {

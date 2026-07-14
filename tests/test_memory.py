@@ -23,13 +23,18 @@ def main():
     win = [t["text"] for t in S.window("u1")]
     ok &= _check("sliding window = last 3", win == ["m3", "m4", "m5"], win)
 
-    S.set_intent("u1", "odm")
-    S.update_lead("u1", {"need": "recorder", "email": "a@x.com"})
+    S.set_entry_intent("u1", "odm")
+    # 必填 = need + 一种联系方式。先只给 need → 应还缺 contact。
+    S.update_lead("u1", {"need": "recorder"})
+    ok &= _check("missing=contact when only need given",
+                 S.snapshot("u1")["lead"]["missing"] == ["contact"], S.snapshot("u1")["lead"])
+    # 再补上 email → need + contact 都齐 → missing 应为空(name 不是必填,不进 missing)。
+    S.update_lead("u1", {"email": "a@x.com"})
     lead = S.snapshot("u1")["lead"]
-    ok &= _check("lead backfill + missing", lead["missing"] == ["name"] and lead["email"] == "a@x.com", lead)
+    ok &= _check("missing empty once need+contact present", lead["missing"] == [] and lead["email"] == "a@x.com", lead)
 
-    S.set_intent("u1", "products")
-    ok &= _check("first intent not clobbered", S.snapshot("u1")["intent"] == "odm", S.snapshot("u1")["intent"])
+    S.set_entry_intent("u1", "products")
+    ok &= _check("first entry_intent not clobbered", S.snapshot("u1")["entry_intent"] == "odm", S.snapshot("u1")["entry_intent"])
 
     S.get_or_create("u2"); S.get_or_create("u3"); S.get_or_create("u4")
     ok &= _check("LRU evicts u1", S.snapshot("u1") is None and S.snapshot("u4") is not None, S.stats())

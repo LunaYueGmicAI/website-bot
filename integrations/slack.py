@@ -30,16 +30,19 @@ def _channel():
 
 def _card_text(session):
     """
-    把会话渲染成"线索卡"文本。每次 lead/intent 变了,就用这个重新生成、覆盖那张卡。
-    例:lead={email:"a@x.com", need:"recorder", missing:["name"]}, intent="odm" →
-        一张列着 Intent/Contact/Name/Need/Source/Missing 的卡片文本。
+    把会话渲染成"线索卡"文本。每次 lead/entry_intent 变了,就用这个重新生成、覆盖那张卡。
+    例:lead={email:"a@x.com", need:"recorder", missing:["name"]}, entry_intent="odm" →
+        一张列着 Entry/Contact/Name/Need/Source/Missing 的卡片文本。
+
+    注意 Entry 和 Need 的区别:Entry=从哪个按钮进来(入口,不变);Need=对话里演变出的真实诉求。
+    用户可能从 ODM 进来但聊着聊着变成"就想买现货"——那时 Entry 仍是 odm,Need 会更新成后者。
     """
     lead = session.get("lead") or {}
-    intent = session.get("intent") or "—"
+    entry_intent = session.get("entry_intent") or "—"
     contact = lead.get("email") or lead.get("phone")
     parts = [
         "*🆕 New GMIC website inquiry*",
-        f"• Intent: {intent}",
+        f"• Entry: {entry_intent}",
         f"• Contact: {'✅ ' + contact if contact else '❌ not left'}",
         f"• Name: {lead.get('name') or '—'}",
         f"• Need: {lead.get('need') or '—'}",

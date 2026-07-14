@@ -84,16 +84,16 @@ async def config():
 async def event(req: EventReq):
     """
     处理快捷按钮点击。action 三种:
-      - topic:话题按钮(如 ODM)→ 种意图 + 建 Slack 卡 + 返回开场白(不调大模型)
+      - topic:话题按钮(如 ODM)→ 种入口意图 + 建 Slack 卡 + 返回开场白(不调大模型)
       - faq  :常见问题       → 返回写死答案(不调大模型),并把这条 Q&A 记进 turns
       - link :跳转按钮       → 只记一下点击(实际跳转在前端做)
     """
     STORE.get_or_create(req.session_id, {"page_url": req.page_url, "lang": req.lang})
 
     if req.action == "topic":
-        # 例:点了 [🏭 ODM] → id="odm" → 查到按钮 → 种 intent="odm" → 返回它的开场白
+        # 例:点了 [🏭 ODM] → id="odm" → 查到按钮 → 种 entry_intent="odm" → 返回它的开场白
         act = ACTIONS.get(req.id, {})
-        STORE.set_intent(req.session_id, act.get("intent"))
+        STORE.set_entry_intent(req.session_id, act.get("entry_intent"))
         opener = act.get("opener", "")
         if opener:
             STORE.append_turn(req.session_id, "assistant", opener)  # 开场白也算一轮,后面能接上下文

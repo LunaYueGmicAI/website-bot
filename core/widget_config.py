@@ -14,5 +14,5 @@ with open(_PATH, encoding="utf-8") as _f:
     CONFIG = json.load(_f)
 
 # 把按钮列表转成"按 id 查"的字典,方便路由里 O(1) 找到某个按钮。
-# 例:ACTIONS["odm"] → {"id":"odm","label":"🏭 定制/ODM","type":"topic","intent":"odm","opener":"..."}
+# 例:ACTIONS["odm"] → {"id":"odm","label":"🏭 定制/ODM","type":"topic","entry_intent":"odm","opener":"..."}
 ACTIONS = {a["id"]: a for a in CONFIG.get("quickActions", [])}
