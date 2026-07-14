@@ -7,7 +7,7 @@ os.environ["LLM_HISTORY_TURNS"] = "3"
 
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from bot import sessions  # noqa: E402
+from core import sessions  # noqa: E402
 
 
 def main():

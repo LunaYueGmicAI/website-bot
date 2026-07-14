@@ -1,55 +1,55 @@
 {
-  "greeting": "Hi 👋 想了解点什么?",
+  "greeting": "Hi 👋 How can we help?",
   "quickActions": [
     {
       "id": "odm",
-      "label": "🏭 定制/ODM",
+      "label": "🏭 Custom / ODM",
       "type": "topic",
       "intent": "odm",
-      "opener": "我们能做 ODM/OEM 定制,从外观、固件到量产都能包。方便说下你大概想做什么产品、预计数量和上市时间吗?"
+      "opener": "We do full ODM/OEM custom hardware — enclosure, firmware, and mass production. Could you tell me roughly what product you have in mind, expected quantity, and your target launch date?"
     },
     {
       "id": "products",
-      "label": "📦 看产品",
+      "label": "📦 Products",
       "type": "link",
       "url": "https://gmic.ai/products/"
     },
     {
       "id": "demo",
-      "label": "📅 预约演示",
+      "label": "📅 Book a demo",
       "type": "link",
       "url": "TODO_CALENDAR_URL"
     },
     {
       "id": "faq",
-      "label": "❓ 常见问题",
+      "label": "❓ FAQ",
       "type": "faq"
     }
   ],
   "faq": [
     {
-      "q": "你们是做什么的?",
-      "a": "TODO: marketing 填写标准话术",
+      "q": "What do you do?",
+      "a": "TODO: marketing fills in the standard answer",
       "link": "https://gmic.ai/about-gmic-ai/"
     },
     {
-      "q": "能定制/贴牌(ODM/OEM)吗?最小起订量多少?",
-      "a": "TODO: marketing 填写 MOQ 话术",
+      "q": "Do you offer custom / white-label (ODM/OEM)? What is the MOQ?",
+      "a": "TODO: marketing fills in the MOQ answer",
       "link": "https://gmic.ai/ai-hardware-odm-oem/"
     },
     {
-      "q": "支持哪些行业/场景?",
-      "a": "TODO: marketing 填写",
+      "q": "Which industries / use cases do you support?",
+      "a": "TODO: marketing fills in",
       "link": "https://gmic.ai/products/"
     },
     {
-      "q": "大概多久能出样/量产?",
-      "a": "TODO: marketing 填写交期话术",
+      "q": "How long for samples / mass production?",
+      "a": "TODO: marketing fills in the lead-time answer",
       "link": null
     },
     {
-      "q": "怎么联系/报价?",
-      "a": "TODO: marketing 填写",
+      "q": "How do I get in touch / request a quote?",
+      "a": "TODO: marketing fills in",
       "link": "https://gmic.ai/contact-gmic-ai/"
     }
   ]

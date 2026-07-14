@@ -102,6 +102,13 @@ One server process, one dict keyed by `session_id`. Each user's messages route t
 entry — never mix. MVP: gunicorn **single worker** + in-memory dict (multi-worker would split
 the dict → session loss; add Redis/sqlite or sticky sessions only when scaling).
 
+## Language (multilingual, English default)
+- Voice: Groq Whisper auto-detects language (`language=None`) → transcribes in whatever the
+  visitor spoke (Chinese voice → Chinese text, English → English).
+- Reply: the LLM is instructed to reply in the SAME language as the visitor's latest message.
+- Default: when language is unclear/empty, fall back to English. All prompt text is written
+  in English; code comments are Chinese; the seed `widget.json` UI copy is English.
+
 ## Stack
 - Backend: Flask on EC2, reverse-proxied via Cloudflare Tunnel to a stable subdomain
   (EC2 IP changes on restart — never point the widget at a raw IP). CORS restricted to gmic.ai.
@@ -109,6 +116,17 @@ the dict → session loss; add Redis/sqlite or sticky sessions only when scaling
 - LLM: OpenAI (swappable) — reply + structured lead extraction.
 - Slack: `slack_sdk` bot token (chat:write, files:write).
 - Config: `config/widget.json` — buttons + FAQ as data the team edits without code.
+
+## Code layout (split by concern, for extensibility)
+```
+app.py            entry: create app + CORS + register routes (kept thin)
+core/             domain: sessions.py (memory mgmt), widget_config.py
+ai/               STT (stt.py), LLM (llm.py), prompts.py
+integrations/     external services — slack.py now; WhatsApp/etc. later
+api/routes.py     HTTP routes (Blueprint)
+config/widget.json  buttons + FAQ (team-editable data)
+tests/            memory-management checks
+```
 
 ## Phases
 - **P0 (Luna):** create Slack app → bot token + `#gmic-web-voice-leads` → fill `.env`.
