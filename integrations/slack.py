@@ -6,8 +6,15 @@ Slack 转发(异步):一个频道,每通对话一个 thread。
 
 若没配 SLACK_BOT_TOKEN(P0 之前),所有函数直接空转,好让其余流程在本地照常跑。
 卡片文案给内部团队看,统一英文(与默认语言一致)。
+
+【容错原则】Slack 只是"旁路归档",绝不能拖垮给用户的主响应。所以下面每个函数在真正调
+  Slack API 的地方都 try/except 吞掉异常(记 log 就好):就算 token 有效但 API 报错
+  (限流、bot 没被邀进频道、网络抖动),/chat、/voice 也照样把 AI 回复返回给用户。
 """
 import os
+import logging
+
+log = logging.getLogger(__name__)
 
 _client = None
 
@@ -70,7 +77,11 @@ async def ensure_card(store, sid):
     c = _client_lazy()
     if not c:
         return None
-    resp = await c.chat_postMessage(channel=_channel(), text=_card_text(session))
+    try:
+        resp = await c.chat_postMessage(channel=_channel(), text=_card_text(session))
+    except Exception:
+        log.exception("Slack ensure_card failed for %s", sid)
+        return None                           # 建卡失败:不设 ts,后续 update_card/post_detail 自动空转
     ts = resp["ts"]
     store.set_slack_ts(sid, ts)               # 记住根消息 ID
     return ts
@@ -82,7 +93,10 @@ async def update_card(store, sid):
     c = _client_lazy()
     if not c or not session or not session.get("slack_thread_ts"):
         return
-    await c.chat_update(channel=_channel(), ts=session["slack_thread_ts"], text=_card_text(session))
+    try:
+        await c.chat_update(channel=_channel(), ts=session["slack_thread_ts"], text=_card_text(session))
+    except Exception:
+        log.exception("Slack update_card failed for %s", sid)
 
 
 async def post_detail(store, sid, text, audio_bytes=None, filename="voice.webm"):
@@ -97,13 +111,24 @@ async def post_detail(store, sid, text, audio_bytes=None, filename="voice.webm")
     if not c or not session:
         return
     ts = session.get("slack_thread_ts")
-    if audio_bytes:
-        # 语音:上传原始音频,顺带把转写文字作为文件说明发出去
-        await c.files_upload_v2(
-            channel=_channel(), thread_ts=ts,
-            filename=filename, content=audio_bytes,
-            initial_comment=text,
-        )
-    else:
-        # 文字:直接发一条 thread 回复
-        await c.chat_postMessage(channel=_channel(), thread_ts=ts, text=text)
+    if not ts:
+        # 没有 thread 根(建卡失败过)→ 别发成频道顶层的游离消息,直接跳过这条明细。
+        log.warning("post_detail skipped for %s: no slack_thread_ts", sid)
+        return
+    try:
+        if audio_bytes:
+            # 语音:把原始音频 + 转写文字一起发进 thread。
+            # ⚠️ 分清两件事:Slack【托管/播放】API 上传的音频文件 → 支持(就是这里 files_upload_v2 干的,
+            #    团队能在 thread 里点开听);但 Slack【自动转写】API 上传的音频 → 不支持(只转 Slack
+            #    客户端里现录的 clip/huddle)。所以转写文字得我们自己用 Groq Whisper 出(见 ai/stt.py),
+            #    再作为 initial_comment(=text,形如 "🎤 转写内容")一并发出去。
+            await c.files_upload_v2(
+                channel=_channel(), thread_ts=ts,
+                filename=filename, content=audio_bytes,
+                initial_comment=text,
+            )
+        else:
+            # 文字:直接发一条 thread 回复
+            await c.chat_postMessage(channel=_channel(), thread_ts=ts, text=text)
+    except Exception:
+        log.exception("Slack post_detail failed for %s", sid)
