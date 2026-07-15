@@ -36,27 +36,27 @@
   "faq": [
     {
       "q": "What do you do?",
-      "a": "TODO: marketing fills in the standard answer",
+      "a": "GMIC AI designs and manufactures custom AI voice hardware — AI voice recorders, wearable microphones, smart badges, AI scribe devices, and Bluetooth/Wi-Fi audio products. We take it end to end, from design and firmware to mass production. Tell us what you have in mind and we'll see how we can help.",
       "link": "https://gmic.ai/about-gmic-ai/"
     },
     {
       "q": "Do you offer custom / white-label (ODM/OEM)? What is the MOQ?",
-      "a": "TODO: marketing fills in the MOQ answer",
+      "a": "Yes — full ODM/OEM is our core: custom enclosure, firmware, tuning, and mass production, all under your brand. MOQ depends on the product and complexity (typically a few hundred to a few thousand units). Tell us what you're building and your target quantity, and we'll give you an exact figure.",
       "link": "https://gmic.ai/ai-hardware-odm-oem/"
     },
     {
       "q": "Which industries / use cases do you support?",
-      "a": "TODO: marketing fills in",
+      "a": "We support voice capture across healthcare and clinical scribing, field service, sales and meetings, education, and enterprise/security — essentially anywhere speech needs to become text or action. If you have a specific use case, describe it and we'll tell you how we'd approach it.",
       "link": "https://gmic.ai/products/"
     },
     {
       "q": "How long for samples / mass production?",
-      "a": "TODO: marketing fills in the lead-time answer",
+      "a": "Timelines depend on complexity and customization, but a typical path is a few weeks for samples and several weeks for mass production once specs are locked. Share your project and timeline and we'll give you a realistic schedule.",
       "link": null
     },
     {
       "q": "How do I get in touch / request a quote?",
-      "a": "TODO: marketing fills in",
+      "a": "The fastest way is to leave your email here with a short note on what you need — our ODM team will follow up with details and a quote. You can also reach us directly via WhatsApp, email (trigg@gmic.ai), or book a call using the buttons above.",
       "link": "https://gmic.ai/contact-gmic-ai/"
     }
   ]
