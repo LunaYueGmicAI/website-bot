@@ -87,23 +87,59 @@ Trimmed old turns already live in Slack. Facts (entry_intent/lead) survive trimm
 - Channel = clean list of lead cards; open a thread to see the full exchange + audio.
 - Real-time, not batched-at-end (there is no reliable "end").
 
-## Interaction flow (voice turn)
+## Interaction flow — full trace of one voice turn
+The journey of a single recording, end to end (text turn is identical minus steps 0 & 2):
 ```
-widget ──POST /event {sid,entry_intent}─► backend: create session + Slack card(root)→store ts
-widget ──POST /voice {sid,audio}──► backend: Groq STT → append turn
-                                     → LLM(window+entry_intent+lead) → reply + lead update
-                                     → Slack: postMessage(thread: audio+transcript+reply)
-                                     → Slack: chat.update(card)
-                                     → delete audio blob
-       ◄── reply (text) ────────────
+[browser web/index.html]
+  tap 🎤 → getUserMedia (mic permission) → MediaRecorder records → tap ⏹ stop
+    → assemble audio Blob → FormData{session_id, audio, page_url}
+    → fetch POST /voice   (multipart, carries the binary audio)
+        │
+        ▼
+[backend api/routes.py::voice()]
+  0) audio.read(); if > MAX_AUDIO_BYTES → 413
+  1) STORE.get_or_create(session_id)              # claim/create THIS user's session
+  2) stt.transcribe(bytes) ───────────►[Groq Whisper API]  audio → text
+       └ empty/failure → return friendly fallback (stop here)
+  3) STORE.append_turn("user", transcript)        # transcript joins this session's turns
+  4) slack.ensure_card + post_detail ────►[Slack]  lead card + push {audio + transcript} to thread
+  5) _run_llm():
+       llm.respond(snapshot, faq, last-N turns) ─►[OpenAI]  reply + extracted lead
+       └ STORE.update_lead(email/need…) + append_turn("assistant", reply)
+  6) slack.post_detail(reply) + update_card ─────►[Slack]  reply into thread + refresh card
+  7) return {reply, transcript}
+        │
+        ▼
+[browser]  transcript → user bubble ;  reply → bot bubble
 ```
+The audio blob is a per-request local variable — released when the function returns, never
+persisted to disk. `/event` (button clicks) is a cheaper cousin: it creates the session +
+Slack card but usually returns a canned reply without touching the LLM.
+
+**Text ↔ voice are interchangeable mid-conversation.** There is no "mode": both `/chat` (typed)
+and `/voice` (spoken→STT) append a `"user"` turn to the *same* session — same `turns`, same
+`lead`, same Slack thread. The LLM sees one unified window regardless of input method, so a
+visitor can type, then send a voice note, then type again, with continuous context. The only
+guard is `busy` (one in-flight request at a time); between turns they switch freely.
 
 ## How one bot serves many users
 One async process, one dict keyed by `session_id`. Each user's messages route to their own
 entry — never mix. A single async process handles many concurrent conversations because each
-request spends its time `await`-ing external APIs (STT/LLM/Slack). Keep it **single process**
-so the in-memory dict stays authoritative (multi-process would split it → session loss; add
-Redis/sqlite only when scaling out).
+request spends its time `await`-ing external APIs (STT/LLM/Slack); while user A waits on Groq,
+the event loop serves B and C. `SessionStore` methods are synchronous & non-awaiting, so they
+are atomic on the event loop (no data races).
+
+Real ceilings to know before scaling:
+1. **Do NOT naively add worker processes.** The session dict lives in *process* memory; multiple
+   uvicorn workers would split sessions → a user's 2nd turn could hit a worker that has no record
+   of them. Horizontal scale needs a shared store (Redis) or sticky sessions. The design is
+   deliberately **single-process** (async single-process already handles solid concurrency).
+2. **The real bottleneck is the external APIs, not our code.** More users → more Groq/OpenAI
+   calls → possible quota/rate-limit hits (see the 2026-06-29 OpenAI key-exhaustion incident).
+3. **No per-user rate limiting yet.** Someone spamming `/voice` burns Groq/OpenAI spend with no
+   throttle. Add per-session/IP limiting before production.
+
+Bounds already in place: `MAX_SESSIONS` (LRU) + TTL sweep keep memory finite regardless of load.
 
 ## Language (multilingual, English default)
 - Voice: Groq Whisper auto-detects language (`language=None`) → transcribes in whatever the

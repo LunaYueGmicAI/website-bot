@@ -112,6 +112,9 @@
   #send { background: var(--accent); color: var(--accent-ink); }
   #send:disabled { opacity: .4; cursor: default; }
   #mic { background: var(--panel); color: var(--muted); border: 1px solid var(--border); }
+  /* 录音中:变红 + 脉动,提示"正在录、再点停止" */
+  #mic.recording { background: #e5484d; color: #fff; border-color: #e5484d; animation: pulse 1.3s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(229,72,77,.5); } 70% { box-shadow: 0 0 0 8px rgba(229,72,77,0); } 100% { box-shadow: 0 0 0 0 rgba(229,72,77,0); } }
 </style>
 </head>
 <body>
@@ -137,7 +140,7 @@
 
   <footer>
     <textarea id="text" rows="1" placeholder="Type your message…"></textarea>
-    <button class="icon-btn" id="mic" title="Voice — coming soon" disabled>🎤</button>
+    <button class="icon-btn" id="mic" title="Speak">🎤</button>
     <button class="icon-btn" id="send" title="Send" disabled>➤</button>
   </footer>
 </div>
@@ -149,9 +152,10 @@
    ============================================================ */
 const API = (window.GMIC_BOT_API || "").replace(/\/$/, "");
 const $ = (id) => document.getElementById(id);
-const messagesEl = $("messages"), textEl = $("text"), sendBtn = $("send");
+const messagesEl = $("messages"), textEl = $("text"), sendBtn = $("send"), micBtn = $("mic");
 const emailEl = $("email"), emailStatus = $("emailStatus"), emailSaveBtn = $("emailSave");
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const MAX_REC_MS = 60000;   // 单次录音上限 60s(后端有 8MB 上限,防超大文件 413)
 
 // 会话身份:存 localStorage,刷新/重开页面仍是同一通对话(和后端 session_id 对齐)
 const SID_KEY = "gmic_bot_sid";
@@ -309,7 +313,76 @@ async function sendText() {
   setBusy(false);
 }
 
-function setBusy(v) { busy = v; sendBtn.disabled = v || !textEl.value.trim(); }
+// ---- 🎤 麦克风听写:录音 → 传 /voice → 转写当用户气泡 + bot 回复 ----
+let mediaRecorder = null, recChunks = [], recording = false, recTimer = null;
+
+async function toggleMic() {
+  if (recording) { stopRecording(); return; }   // 录音中再点 = 停止并发送
+  if (busy) return;                              // 有请求在途先别录
+  // 兼容性:老浏览器 / 非安全上下文(非 https/localhost)拿不到 MediaRecorder
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
+    addBubble("bot", "Voice input isn't supported in this browser — please type instead."); return;
+  }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { addBubble("bot", "I couldn't access your microphone. Please allow mic access, or type instead."); return; }
+
+  recChunks = [];
+  mediaRecorder = new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    clearTimeout(recTimer);
+    stream.getTracks().forEach(t => t.stop());   // 关掉麦克风(浏览器上的录音标记消失)
+    const mime = mediaRecorder.mimeType || "audio/webm";
+    uploadVoice(new Blob(recChunks, { type: mime }), mime);
+  };
+  mediaRecorder.start();
+  recording = true; setMicUI(true);
+  recTimer = setTimeout(() => { if (recording) stopRecording(); }, MAX_REC_MS);  // 到点自动停
+}
+
+function stopRecording() {
+  if (!recording) return;
+  recording = false; setMicUI(false);
+  try { mediaRecorder.stop(); } catch (e) {}
+}
+
+function setMicUI(rec) {
+  micBtn.classList.toggle("recording", rec);
+  micBtn.textContent = rec ? "⏹" : "🎤";
+  micBtn.title = rec ? "Stop & send" : "Speak";
+}
+
+// 按浏览器录出的 mime 定文件扩展名(Groq Whisper 支持 webm/m4a/ogg/wav 等)
+function extFor(mime) {
+  if (!mime) return "webm";
+  if (mime.includes("mp4") || mime.includes("m4a")) return "m4a";
+  if (mime.includes("ogg")) return "ogg";
+  if (mime.includes("wav")) return "wav";
+  return "webm";
+}
+
+async function uploadVoice(blob, mime) {
+  setBusy(true); const stop = showTyping();
+  try {
+    // 音频走 multipart(不是 JSON);别手动设 Content-Type,浏览器会带 multipart 边界
+    const fd = new FormData();
+    fd.append("session_id", sessionId);
+    fd.append("audio", blob, "voice." + extFor(mime));
+    fd.append("page_url", document.referrer || location.href);
+    const res = await fetch(API + "/voice", { method: "POST", body: fd });
+    if (!res.ok) throw new Error("/voice -> " + res.status);
+    const r = await res.json();
+    stop();
+    if (r.transcript) addBubble("user", r.transcript);   // 转写出来就当"用户说的"显示
+    addBubble("bot", r.reply || "…");                    // 听不清时 reply=友好提示
+  } catch (e) {
+    stop(); addBubble("bot", "Sorry, I couldn't process that audio — please try again or type.");
+  }
+  setBusy(false);
+}
+
+function setBusy(v) { busy = v; sendBtn.disabled = v || !textEl.value.trim(); micBtn.disabled = v && !recording; }
 function autosize() { textEl.style.height = "auto"; textEl.style.height = Math.min(textEl.scrollHeight, 120) + "px"; sendBtn.disabled = busy || !textEl.value.trim(); }
 
 // ---- 邮箱框:输入即调 Save 可用态;点 Save → /lead 立刻入库 ----
@@ -339,6 +412,7 @@ async function saveEmail() {
 textEl.addEventListener("input", autosize);
 textEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); } });
 sendBtn.addEventListener("click", sendText);
+micBtn.addEventListener("click", toggleMic);
 emailEl.addEventListener("input", onEmailInput);
 emailSaveBtn.addEventListener("click", saveEmail);
 
