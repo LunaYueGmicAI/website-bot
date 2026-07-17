@@ -42,7 +42,7 @@
   /* 气泡:在按钮正上方弹出 */
   .pop { position: absolute; left: 50%; bottom: calc(100% + 16px); transform: translateX(-50%);
     width: 300px; max-width: 92vw; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 16px; box-shadow: 0 14px 44px rgba(0,0,0,.24); padding: 12px 14px 14px;
+    border-radius: 16px; box-shadow: 0 14px 44px rgba(0,0,0,.24); padding: 10px 13px 12px;
     display: none; animation: pop .16s ease-out; }
   .pop.show { display: block; }
   @keyframes pop { from { transform: translateX(-50%) translateY(6px) scale(.97); opacity: .4; } to { transform: translateX(-50%); opacity: 1; } }
@@ -55,23 +55,22 @@
   .hd .t { font-size: 13px; font-weight: 650; color: var(--text); }
   .x { border: none; background: none; color: var(--muted); font-size: 16px; cursor: pointer; line-height: 1; }
 
-  /* ⭐ 浮动波条:不套方框,透明背景;开局静止横线,说话才起伏 */
-  #wave { display: block; width: 100%; height: 44px; margin: 6px 0 2px; }
-  .status { text-align: center; font-size: 12px; color: var(--muted); min-height: 16px; margin-bottom: 8px; }
+  /* ⭐ 浮动波条:不套方框,透明背景;宽度占 70% 居中;开局静止横线,说话才起伏 */
+  #wave { display: block; width: 70%; height: 40px; margin: 2px auto 1px; }
+  .status { text-align: center; font-size: 11.5px; color: var(--muted); min-height: 15px; margin-bottom: 8px; }
   .status.rec { color: var(--danger); font-weight: 600; }
   .status.bad { color: var(--danger); }
 
-  .em-lbl { font-size: 11px; color: var(--muted); margin: 6px 0 5px; }
-  .em-lbl b { color: var(--danger); }
-  #email { width: 100%; padding: 10px 12px; font-size: 14px; font-family: inherit; border: 1px solid var(--border);
+  /* email + Send 并排一行(Send 在右) */
+  .em-row { display: flex; gap: 8px; align-items: stretch; }
+  #email { flex: 1; min-width: 0; padding: 10px 12px; font-size: 14px; font-family: inherit; border: 1px solid var(--border);
     border-radius: 11px; background: var(--panel); color: var(--text); outline: none; }
   #email:focus { border-color: var(--accent); }
-  .em-hint { font-size: 11.5px; min-height: 15px; margin-top: 4px; color: var(--muted); }
-  .em-hint.bad { color: var(--danger); }
-
-  #send { width: 100%; margin-top: 10px; padding: 11px; border: none; border-radius: 12px; background: var(--accent);
-    color: var(--accent-ink); font-size: 14.5px; font-weight: 650; cursor: pointer; }
+  #send { flex: 0 0 auto; padding: 10px 16px; border: none; border-radius: 11px; background: var(--accent);
+    color: var(--accent-ink); font-size: 14px; font-weight: 650; cursor: pointer; }
   #send:disabled { opacity: .4; cursor: default; }
+  .em-hint { font-size: 11.5px; min-height: 14px; margin-top: 4px; color: var(--muted); }
+  .em-hint.bad { color: var(--danger); }
 
   .done { text-align: center; padding: 16px 6px; }
   .done .big { font-size: 30px; } .done .m2 { margin-top: 7px; font-size: 13px; color: var(--text); }
@@ -87,10 +86,11 @@
       <div class="hd"><span class="t">🎙️ Voice message</span><button class="x" id="close">✕</button></div>
       <canvas id="wave"></canvas>
       <div class="status" id="status">Hold the mic below and speak</div>
-      <div class="em-lbl">Your email <b>*</b> — so we can reply</div>
-      <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
+      <div class="em-row">
+        <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="Your email * (so we can reply)" />
+        <button id="send" disabled>Send</button>
+      </div>
       <div class="em-hint" id="emHint"></div>
-      <button id="send" disabled>Send</button>
     </div>
     <div class="tail"></div>
   </div>
