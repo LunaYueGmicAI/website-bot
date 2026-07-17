@@ -61,6 +61,9 @@
   .status.rec { color: var(--danger); font-weight: 600; }
   .status.bad { color: var(--danger); }
 
+  /* email 标签(小星号红色)在输入框上方 */
+  .em-lbl { font-size: 11.5px; color: var(--muted); margin: 4px 0 5px; }
+  .em-lbl b { color: var(--danger); }
   /* email + Send 并排一行(Send 在右) */
   .em-row { display: flex; gap: 8px; align-items: stretch; }
   #email { flex: 1; min-width: 0; padding: 10px 12px; font-size: 14px; font-family: inherit; border: 1px solid var(--border);
@@ -86,8 +89,9 @@
       <div class="hd"><span class="t">🎙️ Voice message</span><button class="x" id="close">✕</button></div>
       <canvas id="wave"></canvas>
       <div class="status" id="status">Hold the mic below and speak</div>
+      <div class="em-lbl">Your email <b>*</b> — so we can reply</div>
       <div class="em-row">
-        <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="Your email * (so we can reply)" />
+        <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
         <button id="send" disabled>Send</button>
       </div>
       <div class="em-hint" id="emHint"></div>

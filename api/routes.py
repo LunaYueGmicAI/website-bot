@@ -358,10 +358,11 @@ async def voice_message(
     lead_fields["need"] = transcript or "(voice message — see attached audio)"
     STORE.update_lead(session_id, lead_fields)
 
-    # 4) Slack:卡 + 原音频进 thread
+    # 4) Slack:发线索卡 + 原音频进 thread。
+    #    注:lead 已在上一步 update_lead 填好,ensure_card 发出来的卡就是完整的 → 不再 update_card(去冗余、
+    #    也少一次 Slack 调用,对并发有利)。thread 里的音频【不再重复转写文字】(卡上 Message 已有),避免刷两遍。
     await slack.ensure_card(STORE, session_id)
-    await slack.update_card(STORE, session_id)
-    await slack.post_detail(STORE, session_id, f"🎤 {transcript}", audio_bytes=audio_bytes,
+    await slack.post_detail(STORE, session_id, "🎤 Original recording", audio_bytes=audio_bytes,
                             filename=audio.filename or "voice.webm")
 
     # audio_bytes 是本次请求局部变量,函数返回后自动释放,绝不长期驻留内存/磁盘
