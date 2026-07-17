@@ -139,32 +139,31 @@ def main():
     ids = [c.get("id") for c in (d or {}).get("contacts", [])]
     _check("D 报微信 -> 甩 wechat", "wechat" in ids, ids)
 
-    # ---------- 语音(SAPI 合成,无需麦克风) ----------
-    hr("C. /voice 语音链路(真实语音 / 兜底 / 413)")
+    # ---------- 语音留言(独立功能,SAPI 合成,无需麦克风) ----------
+    hr("C. 语音留言(/voice/transcribe 预览 + /voice/message 联系方式必填)")
     tmp = tempfile.gettempdir()
     wav = os.path.join(tmp, "e2e_voice.wav")
-    if sapi_wav("Hello, I want to order two thousand AI voice recorders for my company.", wav):
-        # 语音两步走:第一步 /voice 只拿转写(可立刻上屏),第二步 /reply 拿回复
-        st, d = _post_multipart("/voice", {"session_id": "e2e_voice", "page_url": "https://gmic.ai/"}, wav)
-        d = d or {}
-        _check("第一步 /voice -> 转写非空(可先上屏)", st == 200 and bool(d.get("transcript")), d.get("transcript"))
-        st2, r = _post_json("/reply", {"session_id": "e2e_voice"})
-        _check("第二步 /reply -> 有回复", st2 == 200 and bool((r or {}).get("reply")), (r or {}).get("reply"))
+    if sapi_wav("Hi, I need two thousand custom AI voice recorders for my company.", wav):
+        # 第一步:只转写(浮窗预览)
+        st, d = _post_multipart("/voice/transcribe", {}, wav)
+        _check("/voice/transcribe -> 转写非空", st == 200 and bool((d or {}).get("transcript")), (d or {}).get("transcript"))
+        # 第二步:合法联系方式 + 音频 -> 200 ok
+        st, d = _post_multipart("/voice/message",
+                                {"session_id": "e2e_vm", "contact_type": "email",
+                                 "contact_value": "buyer@acme.com", "text": "Need 2000 recorders",
+                                 "page_url": "https://gmic.ai/"}, wav)
+        _check("/voice/message 合法 email -> 200 ok", st == 200 and (d or {}).get("ok") is True, d)
+        # 题眼:坏邮箱被服务端拦截
+        st, _ = _post_multipart("/voice/message",
+                                {"session_id": "e2e_vm2", "contact_type": "email", "contact_value": "bob(at)acme"}, wav)
+        _check("/voice/message 坏联系方式 -> 400", st == 400, st)
     else:
-        print("[SKIP] 非 Windows,跳过真实语音用例")
-
-    garbage = os.path.join(tmp, "e2e_garbage.wav")
-    with open(garbage, "wb") as f:
-        f.write(os.urandom(2000))
-    st, d = _post_multipart("/voice", {"session_id": "e2e_voice2"}, garbage)
-    # 听不清:/voice 直接带兜底 reply + transcript 空(前端据此不再调 /reply)
-    _check("垃圾音频 -> 兜底话术(不 500)",
-           st == 200 and (d or {}).get("transcript") == "" and bool((d or {}).get("reply")), (d or {}).get("reply"))
+        print("[SKIP] 非 Windows,跳过语音留言用例")
 
     big = os.path.join(tmp, "e2e_big.wav")
     with open(big, "wb") as f:
         f.write(b"\0" * 9_000_000)
-    st, _ = _post_multipart("/voice", {"session_id": "e2e_voice3"}, big)
+    st, _ = _post_multipart("/voice/transcribe", {}, big)
     _check("超大文件 -> 413", st == 413, st)
 
     hr("结果")

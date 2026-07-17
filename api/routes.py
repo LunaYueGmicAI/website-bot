@@ -31,11 +31,9 @@ MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_BYTES", str(8_000_000)))
 
 # 大模型挂了(quota 耗尽/key 失效/超时)时给用户的兜底回复。默认英文(见多语言策略)。
 # 为什么要兜底:见记忆 openai-key-pool-emergency——6-29 全线 key 耗尽过。没兜底的话
-# LLM 一抛异常整个 /chat、/voice 就 500,用户"发了没反应",线索也断在半路。
+# LLM 一抛异常整个 /chat 就 500,用户"发了没反应",线索也断在半路。
 LLM_FALLBACK_REPLY = ("Thanks for reaching out! Our team will follow up shortly — "
                       "please leave your email or phone so we can get back to you.")
-# 语音听不清/转写失败时的友好提示(默认英文)。
-STT_FALLBACK_REPLY = "Sorry, I didn't catch that — could you say it again or type it?"
 
 
 # ======================== 请求体模型(Pydantic 自动校验) ========================
@@ -58,13 +56,6 @@ class ChatReq(BaseModel):
     text: str
     page_url: str | None = None
     lang: str | None = None
-
-
-class ReplyReq(BaseModel):
-    # 例:{"session_id":"sess_ab12"}
-    # 用在【语音两步走】的第二步:第一步 /voice 已把转写当"用户这轮说的话"记进会话并立刻返回给前端
-    # 上屏,这一步只负责"跑大模型出回复"。所以这里没有 text——用户说了什么已经在会话的 turns 里了。
-    session_id: str
 
 
 # ======================== 小工具 ========================
@@ -164,6 +155,34 @@ async def _reply_and_archive(sid):
     return reply, throwbacks
 
 
+# 语音留言的联系方式:平台 key → Slack/messengers 里显示的规范标签。
+# 对齐 sessions.messenger_platform / widget_config 的平台判断(whatsapp/wechat/telegram)。
+_MSGR_LABELS = {"whatsapp": "WhatsApp", "wechat": "WeChat", "telegram": "Telegram", "messenger": "Messenger"}
+
+
+def _validate_contact(ctype, value):
+    """
+    校验语音留言浮窗里必填的【那一种】联系方式,并转成能写进 lead 的字段。
+    这是"发语音前必须留联系方式"的服务端兜底(前端也 gate 一遍,但绝不能只信前端)。
+
+    输入:ctype = "email"/"phone"/"whatsapp"/"wechat"/"telegram";value = 用户填的值。
+    输出:能喂给 STORE.update_lead 的字段 dict;不合法(空/格式错/未知类型)→ None(调用方据此 400)。
+    例:("email","a@b.com") → {"email":"a@b.com"};("whatsapp","+1650...") → {"messengers":["WhatsApp: +1650..."]};
+        ("email","坏邮箱") → None。
+    """
+    value = (value or "").strip()
+    if not value:
+        return None
+    if ctype == "email":
+        return {"email": value} if sessions._valid_email(value) else None
+    if ctype == "phone":
+        return {"phone": value} if sessions._valid_phone(value) else None
+    label = _MSGR_LABELS.get(ctype)
+    if label:
+        return {"messengers": [f"{label}: {value}"]}   # 写成 "Platform: value",messenger_platform 能解析
+    return None
+
+
 # ======================== 路由 ========================
 @router.get("/health")
 async def health():
@@ -237,7 +256,7 @@ async def event(req: EventReq):
 @router.post("/chat")
 async def chat(req: ChatReq):
     """
-    用户【打字】发一条消息的入口(和 /event 按钮、/voice 语音并列)。会真正调大模型。
+    用户【打字】发一条消息的入口(和 /event 按钮并列;语音已拆成独立的 /voice/message 留言)。会真正调大模型。
     具体每步干啥、产出什么见下面各 step 的注释。
     """
     # 空消息直接 400,别浪费一次大模型调用。
@@ -261,81 +280,89 @@ async def chat(req: ChatReq):
 
 
 # 注:原 POST /lead 端点已删除。它只服务于 widget 的"邮箱框 Save"按钮,那个框已连同一起去掉
-#     (鸡肋 + 和对话记忆打架会被覆盖)。联系方式现在全走对话捕获(/chat、/voice)。
+#     (鸡肋 + 和对话记忆打架会被覆盖)。聊天里联系方式走对话捕获(/chat);语音留言走 /voice/message 必填框。
 
 
-@router.post("/voice")
-async def voice(
-    session_id: str = Form(...),
+# ============================================================================
+# 语音留言(独立功能,已从聊天里拆出来)
+#   产品变更:聊天变【纯文字】,语音改成 contacts 行里的"🎙️ 语音留言"——先必填一种联系方式,
+#   再长按录音发出。为什么这么设计:联系方式【打字】输入(可靠),语音只承载"需求描述",
+#   于是彻底绕开"语音听错邮箱字母"这个老坑(见 [[feedback_phone-asr-letters]])。
+#   两个端点:/voice/transcribe(录完预览用,只转写)+ /voice/message(真正发送:联系方式必填→Slack)。
+# ============================================================================
+@router.post("/voice/transcribe")
+async def voice_transcribe(
     audio: UploadFile = File(...),
-    page_url: str | None = Form(None),
     lang: str | None = Form(None),
 ):
     """
-    用户【发语音】的入口——【语音两步走 · 第一步:只转写,立刻返回】。
-    走 multipart 上传原始录音,做 STT + 归档,把转写【马上】返回给前端上屏("你刚说了啥")。
-    【不在这步跑大模型】——大模型出回复交给第二步 /reply,这样用户说完能立刻看到自己的话被
-    准确识别,而不用干等 LLM 出结果才一起冒出来(否则会觉得"没反应")。
-
-    步骤:
-      0) 读录音字节;超大直接 413(防滥用/爆内存),精确按时长限制在前端做
-      1) 确保会话存在(首次发语音就在这建会话,记来源页 page_url/语言 lang)
-      2) 语音→文字:lang=None 时 Whisper 自动识别语种(多语言核心);STT 失败不 500,当"没转出"处理
-      3) 静音/听不清/失败 → 回兜底话术 + 空 transcript(前端据此显示兜底 bot 气泡,不再调 /reply)
-      4) 转写当"用户这轮说的话"记进 turns(第二步 /reply 跑模型时靠它)
-      5) 确保 Slack 线索卡存在
-      6) 原始音频 + 转写一起发进 thread 归档(🎤;满足"原语音和转文字都进 Slack")
-    产出:{"transcript": 转写文字} —— 前端拿到就立刻当用户气泡上屏,然后再调 /reply 要回复。
+    只做转写,不建会话、不发 Slack。给浮窗"录完 → 显示可编辑文字"用(微信式,用户可改错再发)。
+    步骤:读音频(限读防 OOM)→ STT(失败吞异常当没转出)→ 回 {transcript}(可能空串)。
+    真正入库归档在 /voice/message 那一步做。
     """
-    # 0) 读录音 + 大小闸门
-    #    ⚠️ 关键:只读到 MAX_AUDIO_BYTES+1 字节就停,而不是无脑 await audio.read() 把整个文件读进内存。
-    #    否则恶意客户端传个几百 MB,会在"拒绝之前"就先把整坨吃进 RAM(高并发下能 OOM 整个进程)。
-    #    读 上限+1 字节:只要拿到的比上限多(哪怕多 1 字节),就说明超了 → 413,内存占用被死死钉在上限。
-    audio_bytes = await audio.read(MAX_AUDIO_BYTES + 1)
+    audio_bytes = await audio.read(MAX_AUDIO_BYTES + 1)   # 限读:见 /voice/message 里同款说明
     if len(audio_bytes) > MAX_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail="audio too large")
-
-    # 1) 建/取会话
-    STORE.get_or_create(session_id, {"page_url": page_url, "lang": lang})
-
-    # 2) STT(失败吞异常,当没转出)
     try:
         transcript = await stt.transcribe(audio_bytes, filename=audio.filename or "voice.webm",
                                           language=lang or None)
     except Exception:
-        log.exception("stt.transcribe failed for session %s", session_id)
+        log.exception("voice/transcribe stt failed")
         transcript = ""
-    # 3) 没转出文字 → 直接回兜底(带 reply,前端据此显示一条 bot 气泡,不用再调 /reply)
-    if not transcript:
-        return {"transcript": "", "reply": STT_FALLBACK_REPLY}
+    return {"transcript": transcript}
 
-    # 4) 记进 turns(第二步 /reply 跑模型要用)
-    STORE.append_turn(session_id, "user", transcript)
-    # 5) 线索卡
+
+@router.post("/voice/message")
+async def voice_message(
+    session_id: str = Form(...),
+    contact_type: str = Form(...),     # email / phone / whatsapp / wechat / telegram
+    contact_value: str = Form(...),    # 用户填的联系方式值(必填)
+    audio: UploadFile = File(...),
+    text: str | None = Form(None),     # 前端编辑后的最终留言文字(可空→服务端自己转一次)
+    page_url: str | None = Form(None),
+    lang: str | None = Form(None),
+):
+    """
+    发送一条语音留言 = 一条高质量线索(联系方式打字保证可靠 + 语音需求)。
+    步骤:
+      0) 读音频 + 大小闸门(限读到上限+1,防超大上传先吃满 RAM 再拒的 OOM)
+      1) 【服务端】校验联系方式必填 + 格式——绝不只信前端 gate(前端可被绕过)。不合格 → 400
+      2) 最终留言文字:优先用前端编辑后的 text;没有就服务端自己转一次(容错,失败也不 500)
+      3) 建/取会话 → 种 entry_intent="voice-message" → 回填 lead(联系方式 + need=留言)
+      4) Slack:建卡 + 刷新 + 原始音频&文字进 thread 归档(和聊天线索卡同一套渲染)
+      5) 回 {ok, transcript}——前端弹个简单确认即可(不调 LLM,它是留言不是对话)
+    """
+    # 0) 读音频 + 大小闸门
+    audio_bytes = await audio.read(MAX_AUDIO_BYTES + 1)
+    if len(audio_bytes) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="audio too large")
+
+    # 1) 校验联系方式(服务端兜底)
+    lead_fields = _validate_contact(contact_type, contact_value)
+    if not lead_fields:
+        raise HTTPException(status_code=400, detail="a valid contact is required")
+
+    # 2) 最终留言文字:优先前端编辑后的;缺了才自己转
+    transcript = (text or "").strip()
+    if not transcript:
+        try:
+            transcript = await stt.transcribe(audio_bytes, filename=audio.filename or "voice.webm",
+                                              language=lang or None)
+        except Exception:
+            log.exception("voice/message stt failed for session %s", session_id)
+            transcript = ""
+
+    # 3) 建会话 + 回填线索。need 用留言文字;转不出也给个占位,保证这条 lead 完整(有联系方式+need)。
+    STORE.get_or_create(session_id, {"page_url": page_url, "lang": lang})
+    STORE.set_entry_intent(session_id, "voice-message")
+    lead_fields["need"] = transcript or "(voice message — see attached audio)"
+    STORE.update_lead(session_id, lead_fields)
+
+    # 4) Slack:卡 + 原音频进 thread
     await slack.ensure_card(STORE, session_id)
-    # 6) 原音频 + 转写进 Slack thread 归档
+    await slack.update_card(STORE, session_id)
     await slack.post_detail(STORE, session_id, f"🎤 {transcript}", audio_bytes=audio_bytes,
                             filename=audio.filename or "voice.webm")
 
     # audio_bytes 是本次请求局部变量,函数返回后自动释放,绝不长期驻留内存/磁盘
-    # 产出:只回转写,让前端马上上屏;回复由第二步 /reply 生成
-    return {"transcript": transcript}
-
-
-@router.post("/reply")
-async def reply(req: ReplyReq):
-    """
-    【语音两步走 · 第二步:出回复】。第一步 /voice 已把转写记进会话并让前端上屏了,
-    这一步只负责跑大模型出回复 + 归档 + 算甩链。前端在把用户转写上屏后立刻调本端点,
-    于是体验是:说完 → 转写上屏 → 打字点 → bot 回复(而不是两样一起冒出来)。
-
-    为什么单独一个端点而不复用 /chat:/chat 会把 text 当"用户新说的话"再 append 一遍,
-    而语音的用户输入(转写)已经在 /voice 里 append 过了,这里绝不能重复记——所以要一个
-    "只生成回复、不记用户输入"的端点。逻辑体和 /chat 的后半段共用 _reply_and_archive。
-    """
-    # 会话必须已存在(正常是 /voice 刚建的)。不存在 → 400,别对空会话空跑一次模型。
-    if STORE.snapshot(req.session_id) is None:
-        raise HTTPException(status_code=400, detail="unknown session")
-    reply_text, throwbacks = await _reply_and_archive(req.session_id)
-    # 产出:{reply: AI 回复, contacts: 要甩回的直连渠道} → 和 /chat 返回结构一致,前端同一套渲染
-    return {"reply": reply_text, "contacts": throwbacks}
+    return {"ok": True, "transcript": transcript}

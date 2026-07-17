@@ -4,7 +4,7 @@ gmic.ai 网站询盘 bot 的全套测试手册。覆盖三层:纯内存单元测
 调真实 OpenAI 的对话/语音行为。最后一层验收的是「询盘捕获大迭代」(禁脑补/readback/
 messenger 甩链/wants_channel/多语言)。
 
-> 最近一次全量执行:**2026-07-16,本地 `127.0.0.1:8090`,全部 PASS**(单测 13/13 + 端到端 21/21)。
+> 最近一次全量执行:**2026-07-17,本地 `127.0.0.1:8090`,全部 PASS**(内存单测 13/13 + `full_test.py` 59/59 硬断言)。
 
 ---
 
@@ -41,10 +41,13 @@ messengers 并集/同平台留最新、`match_our_channels`/`contact_for_channel
 
 ```bash
 # 服务器必须在跑。需要 OpenAI key;Windows 上会用系统 SAPI 合成语音(无需麦克风)。
+# ⭐ 首选:中英全覆盖综合套件(59 项硬断言 + 6 软观察)
+./venv/Scripts/python.exe tests/full_test.py --base http://127.0.0.1:8090
+# 备选:精简快测
 ./venv/Scripts/python.exe tests/e2e_test.py --base http://127.0.0.1:8090
 ```
 
-**期望:`ALL PASS`(21 项)。** 下面是逐条清单(手动复现用 curl 也列在第 3 节)。
+**期望:`full_test.py` → `ALL HARD CHECKS PASS`。** 下面是逐条清单(手动复现用 curl 也列在第 3 节)。
 
 ### A. 确定性端点(不调 LLM,秒回)
 
@@ -72,16 +75,34 @@ messengers 并集/同平台留最新、`match_our_channels`/`contact_for_channel
 | D 多语言 | "你好,我想定制会议录音麦…" | 用中文回复 |
 | D IM | "我的微信是 luna_gmic369" | 甩 `[wechat]` |
 
-### C. /voice 语音(SAPI 合成,无需麦克风)
+### C. 语音留言(独立功能,SAPI 合成,无需麦克风)
 
-| 用例 | 输入 | 期望 |
+> 2026-07-17 拆分后:聊天纯文字;语音是 contacts 行 🎙️ 的独立"语音留言",两个端点。
+
+| 用例 | 请求 | 期望 |
 |---|---|---|
-| 真实语音 ⭐ | SAPI 合成英文询盘 wav | 200,`transcript` 非空,有 `reply`;**语音听错邮箱时同样触发禁脑补** |
-| 兜底 | 2KB 随机字节 | 200,`transcript:""` + STT 兜底话术(**不 500**) |
+| 转写预览 | `POST /voice/transcribe {audio}` | 200,`transcript` 非空(浮窗录完显示可编辑) |
+| 中文转写 | `POST /voice/transcribe {中文 audio}` | 200,中文 `transcript` |
+| 合法留言 | `POST /voice/message {contact_type=email, contact_value=a@b.com, audio}` | 200,`{ok:true}`,建 Slack 语音卡 |
+| **联系方式 gate** ⭐ | `POST /voice/message {contact_value="bob(at)acme", audio}` | **400**(服务端拦坏邮箱) |
+| 空联系方式 | `contact_value="   "` | **400** |
+| 坏电话 | `contact_type=phone, contact_value="123"` | **400** |
+| 合法 IM | `contact_type=whatsapp, contact_value="+1650..."` | 200 |
+| 缺字段 | `POST /voice/message {无 contact_type/value}` | **422**(Pydantic) |
 | 超大 | 9MB 文件 | **413** |
 
-> ⭐ 语音说邮箱 "sarah at gmic dot ai" → Whisper 实测转成 `saraa.mic.ai`(电话/语音 ASR 听邮箱极差,
-> 已知坑)→ **bot 拒绝入库并要求重打**。这正是「禁脑补 + readback」为语音场景设计的核心价值。
+> ⭐ 题眼:联系方式必须【打字】且服务端校验,语音只承载需求描述——彻底绕开"语音听错邮箱字母"老坑。
+
+### C2. 语音浮窗手动测(真麦克风,笔记本/手机)
+
+自动化测不了麦克风录音 + 音波 UI,需真机在 `web-bot.telalive.us/widget/` 手测:
+1. 点 contacts 行 **🎙️ Voice** → 弹浮窗
+2. **不填联系方式**:发送键应**禁用**(灰)
+3. 选类型(Email/Phone/WhatsApp/WeChat/Telegram)+ 填值:合法显示 "Looks good ✓",坏值显示红字提示
+4. **长按** 🎙️ 按钮:变红脉动 + **实时音波**跳动 + 计时;松手停止
+5. 松手后自动转写 → 文字填进**可编辑框**(可改错)
+6. 联系方式合法 + 有录音 → 发送键亮 → 点发送 → ✅ 成功确认
+7. 去 `#web-bot` 确认卡头是 **🎙️ New VOICE message**(聊天来的是 💬 New CHAT inquiry)
 
 ---
 

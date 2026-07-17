@@ -90,40 +90,44 @@ Trimmed old turns already live in Slack. Facts (entry_intent/lead) survive trimm
 - Channel = clean list of lead cards; open a thread to see the full exchange + audio.
 - Real-time, not batched-at-end (there is no reliable "end").
 
-## Interaction flow — full trace of one voice turn
-The journey of a single recording, end to end (text turn is identical minus steps 0 & 2):
+## Chat and voice are now SEPARATE features (2026-07-17 split)
+The chatbot is **text-only**. Voice was pulled out into a standalone **"voice message"** feature
+whose entry is a 🎙️ button in the contacts row. Why split: speech-to-text mishears emails and
+spelled-out letters badly, so instead of transcribing a contact from voice, the voice popup makes
+the visitor **type one contact (email/phone/IM) — required — before Send is enabled**. The voice
+then only carries the *need* description, where a transcription slip does no harm. This sidesteps
+the whole "voice captured the wrong email" problem class.
+
+### Chat turn (text)
 ```
-[browser web/index.html]
-  tap 🎤 → getUserMedia (mic permission) → MediaRecorder records → tap ⏹ stop
-    → assemble audio Blob → FormData{session_id, audio, page_url}
-    → fetch POST /voice   (multipart, carries the binary audio)
-        │
-        ▼
-[backend api/routes.py::voice()]
-  0) audio.read(); if > MAX_AUDIO_BYTES → 413
-  1) STORE.get_or_create(session_id)              # claim/create THIS user's session
-  2) stt.transcribe(bytes) ───────────►[Groq Whisper API]  audio → text
-       └ empty/failure → return friendly fallback (stop here)
-  3) STORE.append_turn("user", transcript)        # transcript joins this session's turns
-  4) slack.ensure_card + post_detail ────►[Slack]  lead card + push {audio + transcript} to thread
-  5) _run_llm():
-       llm.respond(snapshot, faq, last-N turns) ─►[OpenAI]  reply + extracted lead
-       └ STORE.update_lead(email/need…) + append_turn("assistant", reply)
-  6) slack.post_detail(reply) + update_card ─────►[Slack]  reply into thread + refresh card
-  7) return {reply, transcript}
-        │
-        ▼
-[browser]  transcript → user bubble ;  reply → bot bubble
+[browser] type → POST /chat {session_id, text}
+  → append "user" turn → ensure Slack card + post_detail(👤)
+  → llm.respond(snapshot, faq, last-N turns) [OpenAI, Structured Outputs] → reply + extracted lead
+  → update_lead + post_detail(🤖) + update_card → throwbacks (direct-contact links)
+  → return {reply, contacts}
+```
+
+### Voice message (two calls)
+```
+[browser popup] pick contact type + type value (REQUIRED, validated) ; hold 🎙️ to record (live waveform)
+  1) release → POST /voice/transcribe {audio}  → transcript (preview, editable — WeChat-style)
+  2) tap Send (enabled only when contact valid + audio present)
+       → POST /voice/message {session_id, contact_type, contact_value, text(edited), audio}
+[backend api/routes.py::voice_message()]
+  0) audio.read(MAX+1); if > MAX_AUDIO_BYTES → 413
+  1) _validate_contact(type, value)  # SERVER-side gate; invalid/empty → 400 (never trust client only)
+  2) transcript = edited text, else stt.transcribe(bytes) [OpenAI Whisper]
+  3) get_or_create + set_entry_intent("voice-message") + update_lead(contact + need=transcript)
+  4) slack.ensure_card + update_card + post_detail(🎤 transcript + original audio) [Slack]
+  5) return {ok, transcript}   # no LLM — it's a message drop, not a conversation
 ```
 The audio blob is a per-request local variable — released when the function returns, never
-persisted to disk. `/event` (button clicks) is a cheaper cousin: it creates the session +
-Slack card but usually returns a canned reply without touching the LLM.
+persisted to disk. `/event` (button clicks) creates the session + Slack card but usually returns a
+canned reply without touching the LLM.
 
-**Text ↔ voice are interchangeable mid-conversation.** There is no "mode": both `/chat` (typed)
-and `/voice` (spoken→STT) append a `"user"` turn to the *same* session — same `turns`, same
-`lead`, same Slack thread. The LLM sees one unified window regardless of input method, so a
-visitor can type, then send a voice note, then type again, with continuous context. The only
-guard is `busy` (one in-flight request at a time); between turns they switch freely.
+**Slack cards are tagged by source:** voice messages render `*🎙️ New VOICE message*`, chat
+inquiries render `*💬 New CHAT inquiry*` (branch on `entry_intent == "voice-message"`), so the
+team can tell at a glance which leads came in by voice vs typed chat.
 
 ## How one bot serves many users
 One async process, one dict keyed by `session_id`. Each user's messages route to their own
@@ -139,8 +143,9 @@ Real ceilings to know before scaling:
    deliberately **single-process** (async single-process already handles solid concurrency).
 2. **The real bottleneck is the external APIs, not our code.** More users → more Groq/OpenAI
    calls → possible quota/rate-limit hits (see the 2026-06-29 OpenAI key-exhaustion incident).
-3. **No per-user rate limiting yet.** Someone spamming `/voice` burns Groq/OpenAI spend with no
-   throttle. Add per-session/IP limiting before production.
+3. **No per-user rate limiting yet.** Someone spamming `/chat` or `/voice/message` burns OpenAI
+   spend (LLM + STT) with no throttle. Add per-session/IP limiting before scaling. Target today:
+   ~200 concurrent users (single async worker is comfortable there).
 
 Bounds already in place: `MAX_SESSIONS` (LRU) + TTL sweep keep memory finite regardless of load.
 

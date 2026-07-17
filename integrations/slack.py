@@ -46,14 +46,20 @@ def _card_text(session):
     """
     lead = session.get("lead") or {}
     entry_intent = session.get("entry_intent") or "—"
+    # ⭐ 来源区分:语音留言(entry_intent=="voice-message",由 /voice/message 种)走"语音直达"卡头,
+    #   其余都是聊天询盘。团队在频道里一眼就能分辨这条线索是打字聊出来的还是直接发的语音留言。
+    is_voice = entry_intent == "voice-message"
+    header = "*🎙️ New VOICE message*" if is_voice else "*💬 New CHAT inquiry*"
+    # 语音留言的 Entry 行显示"🎙️ voice message"更直观;聊天则显示入口按钮(odm/—)。
+    entry_display = "🎙️ voice message" if is_voice else entry_intent
     # 联系方式拆成 Email / Phone / Messengers 各一行:给了哪个显示哪个(以前压成一个
     # "Contact",email 优先 → 用户报了 phone/IM 反而看不到,现在都单独列)。
     email = lead.get("email")
     phone = lead.get("phone")
     messengers = lead.get("messengers") or []
     parts = [
-        "*🆕 New GMIC website inquiry*",
-        f"• Entry: {entry_intent}",
+        header,
+        f"• Entry: {entry_display}",
         f"• Email: {'✅ ' + email if email else '—'}",
         f"• Phone: {'✅ ' + phone if phone else '—'}",
         f"• Messengers: {'✅ ' + ', '.join(messengers) if messengers else '—'}",

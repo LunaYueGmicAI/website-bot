@@ -8,9 +8,11 @@
   /* ============================================================
      GMIC 网站咨询 widget —— 单文件自包含(内联 CSS/JS),做成 iframe 独立页。
      iframe 内 origin = 后端域,fetch /chat /event 属同源,不依赖 CORS。
-     定位:多语言"询盘 intake + 导览 + 直接联系我们"。语音=聊天里的听写输入,bot 一律文字回复。
-     布局(从上到下):头部(标题) / 消息区(问候+快捷按钮列+对话) / 固定联系条 / 输入栏。
-     联系方式全走对话捕获(bot readback 确认);已删掉早期的"可选邮箱框"(拐杖 + 会被记忆覆盖)。
+
+     ⭐ 2026-07-17 拆分:聊天 = 纯文字(输入栏去掉麦克风);语音 = 独立"语音留言"功能,
+        入口在 contacts 行的 🎙️ 按钮 → 弹浮窗:先必填一种联系方式(email/phone/IM),
+        再长按录音(带实时音波)→ 松手转写成可编辑文字 → 发送。
+        为什么这么设计:联系方式【打字】保证可靠,语音只承载"需求",绕开"语音听错邮箱字母"老坑。
      ============================================================ */
   :root {
     --accent: #4f46e5;          /* 主色:靛蓝 */
@@ -34,8 +36,8 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: transparent; color: var(--text); }
 
-  /* 整个 widget = 一张带边框/圆角/阴影的卡片(Q7:给聊天框加边线) */
   #app {
+    position: relative;                 /* 语音浮窗 overlay 用绝对定位盖住这张卡 */
     display: flex; flex-direction: column;
     height: 100vh; max-width: 440px; margin: 0 auto;
     background: var(--bg);
@@ -45,13 +47,9 @@
     overflow: hidden;
   }
 
-  /* ---- 头部:只放标题 ---- */
   header { padding: 13px 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
   header .title { font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 8px; }
   header .dot { width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; }
-
-  /* (原"可选邮箱框"CSS 已删:那个框是给语音兜底的拐杖,又会被对话记忆覆盖,鸡肋。
-     联系方式现在全走对话捕获 + bot readback 确认。) */
 
   /* ---- 消息区 ---- */
   #messages { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; }
@@ -64,7 +62,6 @@
     border: 1px solid var(--border); color: var(--accent); text-decoration: none; }
   .qr-img { display: block; margin-top: 8px; width: 168px; max-width: 100%; border-radius: 10px; border: 1px solid var(--border); }
 
-  /* Q3/Q5:快捷按钮做成 greeting 下的【一列】、更醒目;常驻可反复点 */
   .quick-col { display: flex; flex-direction: column; gap: 8px; align-self: stretch; margin: 2px 0 4px; }
   .quick-col .q-btn {
     text-align: left; font-size: 14px; font-weight: 550; padding: 12px 14px; border-radius: 13px;
@@ -72,19 +69,17 @@
   }
   .quick-col .q-btn:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
 
-  /* FAQ 展开的问题 chips */
   .faq-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .chip { font-size: 13px; padding: 7px 11px; border-radius: 999px; border: 1px solid var(--border);
     background: var(--bg); color: var(--text); cursor: pointer; }
   .chip:hover { border-color: var(--accent); color: var(--accent); }
 
-  /* 输入中三点 */
   .typing { align-self: flex-start; display: flex; gap: 4px; padding: 11px 13px; background: var(--bubble-bot); border-radius: var(--radius); }
   .typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite both; }
   .typing span:nth-child(2) { animation-delay: .2s; } .typing span:nth-child(3) { animation-delay: .4s; }
   @keyframes blink { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
 
-  /* ---- Q2/Q5:固定"直接联系我们"条(复制官网联系方式组,醒目、不随对话滚动)---- */
+  /* ---- 固定"直接联系我们"条 ---- */
   .contacts { border-top: 1px solid var(--border); background: var(--panel); padding: 8px 10px; }
   .contacts .lbl { font-size: 10.5px; letter-spacing: .3px; text-transform: uppercase; color: var(--muted); margin: 0 2px 6px; }
   .contacts .row { display: flex; gap: 6px; overflow-x: auto; justify-content: center; }
@@ -92,9 +87,10 @@
     min-width: 58px; padding: 7px 6px; border-radius: 11px; border: 1px solid var(--border); background: var(--bg);
     color: var(--text); text-decoration: none; font-size: 11px; cursor: pointer; }
   .contacts .c-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .contacts .c-btn.voice { border-color: var(--accent); color: var(--accent); font-weight: 600; }
   .contacts .c-btn .ic { font-size: 18px; }
 
-  /* ---- 输入栏:文字 + 麦克风(占位) + 发送 ---- */
+  /* ---- 输入栏:纯文字 + 发送(语音已拆走) ---- */
   footer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--bg); }
   #text { flex: 1; resize: none; max-height: 120px; padding: 10px 12px; font-size: 14px; font-family: inherit;
     border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text); outline: none; }
@@ -102,10 +98,52 @@
   .icon-btn { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer; font-size: 17px; display: grid; place-items: center; }
   #send { background: var(--accent); color: var(--accent-ink); }
   #send:disabled { opacity: .4; cursor: default; }
-  #mic { background: var(--panel); color: var(--muted); border: 1px solid var(--border); }
-  /* 录音中:变红 + 脉动,提示"正在录、再点停止" */
-  #mic.recording { background: #e5484d; color: #fff; border-color: #e5484d; animation: pulse 1.3s infinite; }
-  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(229,72,77,.5); } 70% { box-shadow: 0 0 0 8px rgba(229,72,77,0); } 100% { box-shadow: 0 0 0 0 rgba(229,72,77,0); } }
+
+  /* ============================================================
+     语音留言浮窗
+     ============================================================ */
+  .vm-overlay { position: absolute; inset: 0; z-index: 50; display: flex; align-items: flex-end;
+    background: rgba(15, 17, 24, .45); backdrop-filter: blur(2px); }
+  .vm-card { width: 100%; max-height: 92%; overflow-y: auto; background: var(--bg);
+    border-top-left-radius: 18px; border-top-right-radius: 18px; padding: 14px 16px 18px;
+    box-shadow: 0 -8px 30px rgba(0,0,0,.25); animation: vmUp .18s ease-out; }
+  @keyframes vmUp { from { transform: translateY(18px); opacity: .6; } to { transform: none; opacity: 1; } }
+  .vm-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .vm-head .t { font-weight: 650; font-size: 15px; }
+  .vm-close { border: none; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; }
+
+  .vm-label { font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: var(--muted); margin: 2px 0 6px; }
+  .vm-req { color: #e5484d; }
+  .vm-seg { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 8px; }
+  .vm-seg button { flex: 0 0 auto; font-size: 12px; padding: 7px 10px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+  .vm-seg button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .vm-input { width: 100%; padding: 11px 12px; font-size: 14px; font-family: inherit; border: 1px solid var(--border);
+    border-radius: 12px; background: var(--panel); color: var(--text); outline: none; }
+  .vm-input:focus { border-color: var(--accent); }
+  .vm-hint { font-size: 12px; min-height: 16px; margin-top: 5px; color: var(--muted); }
+  .vm-hint.bad { color: #e5484d; }
+  .vm-hint.ok { color: #2ecc71; }
+
+  .vm-rec { margin: 14px 0 6px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .vm-wave { width: 100%; height: 56px; border-radius: 12px; background: var(--panel); border: 1px solid var(--border); }
+  .vm-mic { width: 100%; padding: 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel);
+    color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer; user-select: none; -webkit-user-select: none;
+    touch-action: none; }              /* touch-action:none 防长按时页面滚动 */
+  .vm-mic.rec { background: #e5484d; color: #fff; border-color: #e5484d; animation: vmPulse 1.3s infinite; }
+  @keyframes vmPulse { 0% { box-shadow: 0 0 0 0 rgba(229,72,77,.5); } 70% { box-shadow: 0 0 0 10px rgba(229,72,77,0); } 100% { box-shadow: 0 0 0 0 rgba(229,72,77,0); } }
+  .vm-timer { font-size: 12px; color: var(--muted); min-height: 16px; }
+
+  .vm-text { width: 100%; min-height: 64px; resize: vertical; padding: 10px 12px; font-size: 14px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text); outline: none; margin-top: 4px; }
+  .vm-text:focus { border-color: var(--accent); }
+
+  .vm-send { width: 100%; margin-top: 12px; padding: 13px; border: none; border-radius: 14px;
+    background: var(--accent); color: var(--accent-ink); font-size: 15px; font-weight: 650; cursor: pointer; }
+  .vm-send:disabled { opacity: .4; cursor: default; }
+  .vm-ok { text-align: center; padding: 22px 8px; }
+  .vm-ok .big { font-size: 34px; }
+  .vm-ok .msg2 { margin-top: 8px; font-size: 14px; color: var(--text); }
 </style>
 </head>
 <body>
@@ -121,26 +159,63 @@
     <div class="row" id="contactRow"></div>
   </div>
 
-  <!-- (原可选邮箱框已删除;联系方式改由对话捕获,bot 会 readback 确认。) -->
-
   <footer>
     <textarea id="text" rows="1" placeholder="Type your message…"></textarea>
-    <button class="icon-btn" id="mic" title="Speak">🎤</button>
     <button class="icon-btn" id="send" title="Send" disabled>➤</button>
   </footer>
+
+  <!-- ---- 语音留言浮窗(默认隐藏) ---- -->
+  <div class="vm-overlay" id="voiceModal" hidden>
+    <div class="vm-card" id="vmCard">
+      <div class="vm-head">
+        <span class="t">🎙️ Leave a voice message</span>
+        <button class="vm-close" id="vmClose" title="Close">✕</button>
+      </div>
+      <div id="vmBody">
+        <!-- 联系方式(必填):选类型 + 填值 -->
+        <div class="vm-label">Your contact <span class="vm-req">*required</span></div>
+        <div class="vm-seg" id="vmSeg">
+          <button data-t="email" class="on">✉️ Email</button>
+          <button data-t="phone">📞 Phone</button>
+          <button data-t="whatsapp">💬 WhatsApp</button>
+          <button data-t="wechat">🟢 WeChat</button>
+          <button data-t="telegram">✈️ Telegram</button>
+        </div>
+        <input class="vm-input" id="vmContact" placeholder="you@example.com" autocomplete="off" />
+        <div class="vm-hint" id="vmHint">We need one way to reach you before you send.</div>
+
+        <!-- 录音:实时音波 + 长按说话 -->
+        <div class="vm-rec">
+          <canvas class="vm-wave" id="vmWave"></canvas>
+          <button class="vm-mic" id="vmMic">Hold to talk</button>
+          <div class="vm-timer" id="vmTimer"></div>
+        </div>
+
+        <!-- 转录预览(可编辑),录完才显示 -->
+        <textarea class="vm-text" id="vmText" placeholder="Your message (you can edit before sending)…" hidden></textarea>
+
+        <button class="vm-send" id="vmSend" disabled>Send voice message</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
 /* ============================================================
-   前端逻辑。后端入口:GET /config、POST /event(topic/faq/link)、POST /chat。
+   前端逻辑。后端入口:
+     GET  /config
+     POST /event (topic/faq/link)
+     POST /chat  (纯文字对话)
+     POST /voice/transcribe (语音留言:只转写,做预览)
+     POST /voice/message    (语音留言:联系方式必填 → 发 Slack)
    API 走相对路径(同源);如需指向别的后端可设 window.GMIC_BOT_API。
    ============================================================ */
 const API = (window.GMIC_BOT_API || "").replace(/\/$/, "");
 const $ = (id) => document.getElementById(id);
-const messagesEl = $("messages"), textEl = $("text"), sendBtn = $("send"), micBtn = $("mic");
-const MAX_REC_MS = 60000;   // 单次录音上限 60s(后端有 8MB 上限,防超大文件 413)
+const messagesEl = $("messages"), textEl = $("text"), sendBtn = $("send");
+const MAX_REC_MS = 60000;   // 单次录音上限 60s(后端 8MB 上限兜底)
 
-// 会话身份:存 localStorage,刷新/重开页面仍是同一通对话(和后端 session_id 对齐)
+// 会话身份:存 localStorage,刷新/重开仍是同一通对话(和后端 session_id 对齐)
 const SID_KEY = "gmic_bot_sid";
 let sessionId = localStorage.getItem(SID_KEY);
 if (!sessionId) {
@@ -149,7 +224,7 @@ if (!sessionId) {
 }
 
 let CONFIG = null;
-let busy = false;   // 一次只允许一个在途请求,防连点
+let busy = false;   // 一次只允许一个聊天请求在途,防连点
 
 async function postJSON(path, body) {
   const res = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -158,10 +233,6 @@ async function postJSON(path, body) {
 }
 function scrollDown() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 
-// role: "bot" | "user"
-// opts.link = FAQ "了解更多"链接(文案固定 Learn more →)
-// opts.action = {url, label} 通用打开按钮(联系方式用:打开 WhatsApp / 拨号 / 写邮件…)
-// opts.qr = 微信二维码图
 function addBubble(role, text, opts = {}) {
   const el = document.createElement("div");
   el.className = "msg " + role;
@@ -194,7 +265,6 @@ function showTyping() {
   return () => el.remove();
 }
 
-// greeting 下面的【快捷按钮列】(Q3:常驻;每次都新渲染一组,反复可点)
 function renderQuickColumn() {
   const col = document.createElement("div");
   col.className = "quick-col";
@@ -246,13 +316,17 @@ async function onFaq(index, question) {
   setBusy(false);
 }
 
-// Q2/Q5:渲染固定"直接联系我们"条(数据来自 /config 的 contacts)。
-// 统一交互:点任一按钮 → 在聊天里弹一个气泡,显示【具体信息】(邮箱/电话/链接/二维码)+ 打开按钮。
-// 好处:邮箱/电话不依赖本机 mailto/tel 处理器也能看到并复制;每次点击都有可见反馈,和 WeChat 一致。
+// 固定"直接联系我们"条:🎙️语音留言 + ⚡快捷 + 各联系方式
 function renderContacts() {
   const list = CONFIG.contacts || [];
   const row = $("contactRow");
-  // ⚡ 快捷动作:放进这一栏最前面(点了把那列按钮弹到对话底部,随时可召唤)
+  // 🎙️ 语音留言(醒目,放最前)
+  const v = document.createElement("button");
+  v.className = "c-btn voice";
+  v.innerHTML = `<span class="ic">🎙️</span>Voice`;
+  v.onclick = openVoiceModal;
+  row.appendChild(v);
+  // ⚡ 快捷动作
   const q = document.createElement("button");
   q.className = "c-btn";
   q.innerHTML = `<span class="ic">⚡</span>Quick`;
@@ -271,16 +345,13 @@ function renderContacts() {
 
 function onContactClick(c) {
   if (c.type === "qr") {
-    // 微信:把二维码贴进对话
     addBubble("bot", c.value || "Scan to add us on WeChat:", { qr: c.qr });
   } else {
-    // 其余:气泡显示具体值(可复制)+ 一个打开按钮(mailto/tel/深链)
     addBubble("bot", `${c.label}: ${c.value || ""}`, { action: { url: c.url, label: c.open_label } });
   }
 }
 
-// 后端在用户报了某 IM 后回传的"直连渠道"(WhatsApp/微信/Telegram)——甩一个"想直接找我们?点这里"的气泡。
-// 数据结构就是 /config 里 contacts 的那几条,所以渲染逻辑和 onContactClick 一致(二维码 vs 打开按钮)。
+// 后端在用户(打字)报了某 IM 后回传的"直连渠道"——甩一个"想直接找我们?点这里"的气泡
 function renderThrowbacks(list) {
   for (const c of list || []) {
     if (c.type === "qr") {
@@ -292,7 +363,7 @@ function renderThrowbacks(list) {
   }
 }
 
-// ---- 打字消息闭环 ----
+// ---- 打字消息闭环(纯文字) ----
 async function sendText() {
   const text = textEl.value.trim();
   if (!text || busy) return;
@@ -303,52 +374,78 @@ async function sendText() {
     const body = { session_id: sessionId, text, page_url: document.referrer || location.href };
     const r = await postJSON("/chat", body);
     stop(); addBubble("bot", r.reply || "…");
-    renderThrowbacks(r.contacts);   // 用户报了 WhatsApp/微信/Telegram 时,附上我们的直连入口
+    renderThrowbacks(r.contacts);
   } catch (e) { stop(); addBubble("bot", "Sorry, I'm having trouble right now — please try again in a moment."); }
   setBusy(false);
 }
 
-// ---- 🎤 麦克风听写:录音 → 传 /voice → 转写当用户气泡 + bot 回复 ----
-let mediaRecorder = null, recChunks = [], recording = false, recTimer = null;
+function setBusy(v) { busy = v; sendBtn.disabled = v || !textEl.value.trim(); }
+function autosize() { textEl.style.height = "auto"; textEl.style.height = Math.min(textEl.scrollHeight, 120) + "px"; sendBtn.disabled = busy || !textEl.value.trim(); }
 
-async function toggleMic() {
-  if (recording) { stopRecording(); return; }   // 录音中再点 = 停止并发送
-  if (busy) return;                              // 有请求在途先别录
-  // 兼容性:老浏览器 / 非安全上下文(非 https/localhost)拿不到 MediaRecorder
-  if (!navigator.mediaDevices || !window.MediaRecorder) {
-    addBubble("bot", "Voice input isn't supported in this browser — please type instead."); return;
-  }
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (e) { addBubble("bot", "I couldn't access your microphone. Please allow mic access, or type instead."); return; }
+textEl.addEventListener("input", autosize);
+textEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); } });
+sendBtn.addEventListener("click", sendText);
 
-  recChunks = [];
-  mediaRecorder = new MediaRecorder(stream);
-  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
-  mediaRecorder.onstop = () => {
-    clearTimeout(recTimer);
-    stream.getTracks().forEach(t => t.stop());   // 关掉麦克风(浏览器上的录音标记消失)
-    const mime = mediaRecorder.mimeType || "audio/webm";
-    uploadVoice(new Blob(recChunks, { type: mime }), mime);
-  };
-  mediaRecorder.start();
-  recording = true; setMicUI(true);
-  recTimer = setTimeout(() => { if (recording) stopRecording(); }, MAX_REC_MS);  // 到点自动停
+/* ============================================================
+   🎙️ 语音留言浮窗
+   流程:选联系方式类型 + 填值(必填,合法才能发) → 长按录音(实时音波)→ 松手转写成可编辑文字
+        → 点发送(POST /voice/message,联系方式随音频一起上去)→ 成功确认。
+   为什么联系方式必填:语音听邮箱/字母极差,所以联系方式一律打字;语音只承载需求描述。
+   ============================================================ */
+const vmModal = $("voiceModal"), vmSeg = $("vmSeg"), vmContact = $("vmContact"),
+      vmHint = $("vmHint"), vmMic = $("vmMic"), vmWave = $("vmWave"), vmTimer = $("vmTimer"),
+      vmText = $("vmText"), vmSend = $("vmSend"), vmBody = $("vmBody");
+
+// 联系方式类型 → 输入框 placeholder + 前端校验规则(和后端 _validate_contact 对齐)
+const VM_TYPES = {
+  email:    { ph: "you@example.com",   ok: (v) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) },
+  phone:    { ph: "+1 650 555 1234",   ok: (v) => (v.replace(/\D/g, "").length >= 7 && v.replace(/\D/g, "").length <= 15) },
+  whatsapp: { ph: "WhatsApp number/ID", ok: (v) => v.trim().length > 0 },
+  wechat:   { ph: "WeChat ID",          ok: (v) => v.trim().length > 0 },
+  telegram: { ph: "@your_telegram",     ok: (v) => v.trim().length > 0 },
+};
+let vmType = "email";
+let vmBlob = null, vmMime = "audio/webm";     // 录到的音频
+let vmRecording = false, vmRecorder = null, vmChunks = [], vmStream = null;
+let vmAudioCtx = null, vmAnalyser = null, vmRaf = 0, vmTimer0 = 0, vmMaxTimer = 0, vmDown = 0;
+
+function openVoiceModal() {
+  // 重置到初始态
+  vmType = "email"; setSegUI();
+  vmContact.value = ""; vmText.value = ""; vmText.hidden = true;
+  vmBlob = null; vmTimer.textContent = ""; setHint("We need one way to reach you before you send.", "");
+  vmBody.hidden = false;
+  vmModal.hidden = false;
+  updateSendState();
 }
-
-function stopRecording() {
-  if (!recording) return;
-  recording = false; setMicUI(false);
-  try { mediaRecorder.stop(); } catch (e) {}
+function closeVoiceModal() {
+  if (vmRecording) stopRec();
+  vmModal.hidden = true;
 }
+function setHint(msg, cls) { vmHint.textContent = msg; vmHint.className = "vm-hint" + (cls ? " " + cls : ""); }
+function contactValid() { return VM_TYPES[vmType].ok(vmContact.value || ""); }
+function updateSendState() { vmSend.disabled = !(contactValid() && vmBlob); }
 
-function setMicUI(rec) {
-  micBtn.classList.toggle("recording", rec);
-  micBtn.textContent = rec ? "⏹" : "🎤";
-  micBtn.title = rec ? "Stop & send" : "Speak";
+function setSegUI() {
+  [...vmSeg.children].forEach((b) => b.classList.toggle("on", b.dataset.t === vmType));
+  vmContact.placeholder = VM_TYPES[vmType].ph;
 }
+vmSeg.addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  vmType = b.dataset.t; setSegUI();
+  // 切类型后重新校验提示
+  if (vmContact.value.trim()) validateContactUI(); else setHint("We need one way to reach you before you send.", "");
+  updateSendState();
+});
+function validateContactUI() {
+  if (!vmContact.value.trim()) { setHint("We need one way to reach you before you send.", ""); return; }
+  if (contactValid()) setHint("Looks good ✓", "ok");
+  else setHint("That doesn't look like a valid " + vmType + " — please check it.", "bad");
+}
+vmContact.addEventListener("input", () => { validateContactUI(); updateSendState(); });
+$("vmClose").addEventListener("click", closeVoiceModal);
+vmModal.addEventListener("click", (e) => { if (e.target === vmModal) closeVoiceModal(); });  // 点遮罩关闭
 
-// 按浏览器录出的 mime 定文件扩展名(Groq Whisper 支持 webm/m4a/ogg/wav 等)
 function extFor(mime) {
   if (!mime) return "webm";
   if (mime.includes("mp4") || mime.includes("m4a")) return "m4a";
@@ -357,48 +454,152 @@ function extFor(mime) {
   return "webm";
 }
 
-// 【语音两步走】说完 → 第一步 /voice 只转写,拿到就【马上】把"你说的话"上屏(让用户立刻确认
-// 自己被准确识别了)→ 再第二步 /reply 出回复,中间显示打字点。这样转写和答案不会一起冒出来。
-async function uploadVoice(blob, mime) {
-  setBusy(true);
-  let stop = showTyping();   // 第一段等待:STT 转写中
-  try {
-    // ---- 第一步:上传音频,只拿转写 ----
-    // 音频走 multipart(不是 JSON);别手动设 Content-Type,浏览器会带 multipart 边界
-    const fd = new FormData();
-    fd.append("session_id", sessionId);
-    fd.append("audio", blob, "voice." + extFor(mime));
-    fd.append("page_url", document.referrer || location.href);
-    const res = await fetch(API + "/voice", { method: "POST", body: fd });
-    if (!res.ok) throw new Error("/voice -> " + res.status);
-    const v = await res.json();
-    stop();   // 转写回来了,先撤掉打字点
+// ---- 长按录音(pointer 事件统一 触摸+鼠标)----
+vmMic.addEventListener("pointerdown", (e) => { e.preventDefault(); startRec(); });
+// 松手/离开/取消都停止;监听 window 保证移出按钮也能停
+window.addEventListener("pointerup", () => { if (vmRecording) stopRec(); });
+window.addEventListener("pointercancel", () => { if (vmRecording) stopRec(); });
 
-    // 听不清/静音:后端回了兜底 reply、transcript 为空 → 显示一条 bot 兜底气泡,到此为止
-    if (!v.transcript) { addBubble("bot", v.reply || "Sorry, I didn't catch that — please try again or type."); setBusy(false); return; }
+async function startRec() {
+  if (vmRecording) return;
+  if (!navigator.mediaDevices || !window.MediaRecorder) { setHint("Voice isn't supported in this browser.", "bad"); return; }
+  try { vmStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { setHint("Couldn't access your microphone — please allow mic access.", "bad"); return; }
 
-    // 转写到手 → 立刻当"用户说的话"上屏(此刻 bot 答案还没生成,用户已能看到自己刚说了啥)
-    addBubble("user", v.transcript);
+  vmChunks = []; vmBlob = null; vmText.hidden = true; updateSendState();
+  vmRecorder = new MediaRecorder(vmStream);
+  vmMime = vmRecorder.mimeType || "audio/webm";
+  vmRecorder.ondataavailable = (e) => { if (e.data && e.data.size) vmChunks.push(e.data); };
+  vmRecorder.onstop = onRecStop;
+  vmRecorder.start();
 
-    // ---- 第二步:让后端跑大模型出回复 ----
-    stop = showTyping();   // 第二段等待:LLM 生成回复中
-    const r = await postJSON("/reply", { session_id: sessionId });
-    stop();
-    addBubble("bot", r.reply || "…");
-    renderThrowbacks(r.contacts);   // 语音里报了 IM 时,同样甩直连入口(和打字一致)
-  } catch (e) {
-    stop(); addBubble("bot", "Sorry, I couldn't process that audio — please try again or type.");
-  }
-  setBusy(false);
+  vmRecording = true; vmDown = Date.now();
+  vmMic.classList.add("rec"); vmMic.textContent = "Release to finish";
+  setHint("Listening… speak now", "");
+  startWave(vmStream);
+  vmTimer0 = Date.now();
+  tickTimer();
+  vmMaxTimer = setTimeout(() => { if (vmRecording) stopRec(); }, MAX_REC_MS);
 }
 
-function setBusy(v) { busy = v; sendBtn.disabled = v || !textEl.value.trim(); micBtn.disabled = v && !recording; }
-function autosize() { textEl.style.height = "auto"; textEl.style.height = Math.min(textEl.scrollHeight, 120) + "px"; sendBtn.disabled = busy || !textEl.value.trim(); }
+function stopRec() {
+  if (!vmRecording) return;
+  vmRecording = false;
+  clearTimeout(vmMaxTimer);
+  vmMic.classList.remove("rec"); vmMic.textContent = "Hold to talk";
+  try { vmRecorder.stop(); } catch (e) {}
+}
 
-textEl.addEventListener("input", autosize);
-textEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); } });
-sendBtn.addEventListener("click", sendText);
-micBtn.addEventListener("click", toggleMic);
+function onRecStop() {
+  stopWave();
+  if (vmStream) { vmStream.getTracks().forEach((t) => t.stop()); vmStream = null; }
+  const heldMs = Date.now() - vmDown;
+  vmTimer.textContent = "";
+  if (heldMs < 400 || !vmChunks.length) { setHint("Too short — press and hold to talk.", "bad"); return; }
+  const blob = new Blob(vmChunks, { type: vmMime });
+  transcribePreview(blob);
+}
+
+function tickTimer() {
+  if (!vmRecording) return;
+  const s = Math.floor((Date.now() - vmTimer0) / 1000);
+  vmTimer.textContent = `● ${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  setTimeout(tickTimer, 250);
+}
+
+// 录完 → 调 /voice/transcribe 拿文字,填进可编辑框(微信式,用户可改错)
+async function transcribePreview(blob) {
+  vmBlob = blob; updateSendState();       // 有音频了(即使转写失败也能发,后端会自己再转/存音频)
+  setHint("Transcribing…", "");
+  vmText.hidden = false; vmText.value = ""; vmText.placeholder = "Transcribing…";
+  try {
+    const fd = new FormData();
+    fd.append("audio", blob, "voice." + extFor(vmMime));
+    const res = await fetch(API + "/voice/transcribe", { method: "POST", body: fd });
+    const r = res.ok ? await res.json() : {};
+    vmText.value = r.transcript || "";
+    vmText.placeholder = "Your message (you can edit before sending)…";
+    setHint(contactValid() ? "Looks good ✓ — edit if needed, then send." : "Add your contact above, then send.", contactValid() ? "ok" : "");
+  } catch (e) {
+    vmText.placeholder = "Couldn't transcribe, but your audio is ready — just send.";
+    setHint("Audio ready. Add your contact, then send.", "");
+  }
+  updateSendState();
+}
+
+// ---- 音波可视化(Web Audio AnalyserNode → canvas 画条)----
+function startWave(stream) {
+  try {
+    vmAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = vmAudioCtx.createMediaStreamSource(stream);
+    vmAnalyser = vmAudioCtx.createAnalyser();
+    vmAnalyser.fftSize = 256;
+    src.connect(vmAnalyser);
+    drawWave();
+  } catch (e) { /* 音波只是锦上添花,失败不影响录音 */ }
+}
+function drawWave() {
+  if (!vmAnalyser) return;
+  const cv = vmWave, ctx = cv.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  if (cv.width !== cv.clientWidth * dpr) { cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr; }
+  const n = vmAnalyser.frequencyBinCount, data = new Uint8Array(n);
+  vmAnalyser.getByteFrequencyData(data);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const bars = 40, step = Math.floor(n / bars), bw = cv.width / bars;
+  ctx.fillStyle = "#4f46e5";
+  for (let i = 0; i < bars; i++) {
+    const v = data[i * step] / 255;                       // 0..1
+    const h = Math.max(2 * dpr, v * cv.height);
+    ctx.fillRect(i * bw + bw * 0.2, (cv.height - h) / 2, bw * 0.6, h);
+  }
+  vmRaf = requestAnimationFrame(drawWave);
+}
+function stopWave() {
+  if (vmRaf) cancelAnimationFrame(vmRaf), vmRaf = 0;
+  if (vmAudioCtx) { try { vmAudioCtx.close(); } catch (e) {} vmAudioCtx = null; }
+  vmAnalyser = null;
+  const ctx = vmWave.getContext("2d"); ctx && ctx.clearRect(0, 0, vmWave.width, vmWave.height);
+}
+
+// ---- 发送语音留言 ----
+vmSend.addEventListener("click", async () => {
+  if (vmSend.disabled) return;
+  if (!contactValid()) { validateContactUI(); return; }
+  if (!vmBlob) { setHint("Please record a message first.", "bad"); return; }
+  vmSend.disabled = true; vmSend.textContent = "Sending…";
+  try {
+    const fd = new FormData();
+    fd.append("session_id", sessionId);
+    fd.append("contact_type", vmType);
+    fd.append("contact_value", vmContact.value.trim());
+    fd.append("text", vmText.value.trim());
+    fd.append("audio", vmBlob, "voice." + extFor(vmMime));
+    fd.append("page_url", document.referrer || location.href);
+    const res = await fetch(API + "/voice/message", { method: "POST", body: fd });
+    if (!res.ok) throw new Error("/voice/message -> " + res.status);
+    showVoiceSuccess(vmContact.value.trim());
+  } catch (e) {
+    vmSend.disabled = false; vmSend.textContent = "Send voice message";
+    setHint("Couldn't send — please try again.", "bad");
+  }
+});
+
+function showVoiceSuccess(contact) {
+  vmBody.hidden = true;
+  const ok = document.createElement("div");
+  ok.className = "vm-ok";
+  ok.innerHTML = `<div class="big">✅</div><div class="msg2">Voice message sent!<br>We'll get back to you at <b></b> shortly.</div>`;
+  ok.querySelector("b").textContent = contact;         // 用 textContent 防注入
+  const done = document.createElement("button");
+  done.className = "vm-send"; done.textContent = "Done";
+  done.onclick = () => { vmModal.hidden = true; vmBody.hidden = false; };
+  ok.appendChild(done);
+  $("vmCard").appendChild(ok);
+  // 同时在聊天里留一条确认气泡
+  addBubble("bot", "✅ Thanks! We got your voice message and will reach you at " + contact + ".");
+  setTimeout(() => { if (!vmModal.hidden) { vmModal.hidden = true; vmBody.hidden = false; ok.remove(); } }, 4000);
+}
 
 // ---- 启动:拉配置 → 问候语 + 快捷按钮列 + 联系条 ----
 (async function init() {

@@ -118,20 +118,17 @@ def has_cjk(s):
     return any("一" <= ch <= "鿿" for ch in s or "")
 
 
-def voice_two_step(sid, wav):
-    """
-    模拟前端【语音两步走】:第一步 /voice 只拿转写;转写非空再第二步 /reply 拿回复。
-    返回 (voice状态码, 转写, 回复, contact_ids)。转写空(听不清)时 reply 来自 /voice 的兜底,不调 /reply。
-    """
-    st, v = _post_multipart("/voice", {"session_id": sid, "page_url": "https://gmic.ai/"}, wav)
-    v = v or {}
-    transcript = v.get("transcript", "")
-    if not transcript:                       # 听不清:/voice 直接带兜底 reply,前端不会再调 /reply
-        return st, "", v.get("reply", ""), []
-    st2, r = _post_json("/reply", {"session_id": sid})
-    r = r or {}
-    ids = [c.get("id") for c in r.get("contacts", [])]
-    return st, transcript, r.get("reply", ""), ids
+def vm_transcribe(wav):
+    """语音留言第一步:POST /voice/transcribe(只转写)。返回 (状态码, 转写)。"""
+    st, d = _post_multipart("/voice/transcribe", {}, wav)
+    return st, (d or {}).get("transcript", "")
+
+
+def vm_message(sid, wav, ctype, cvalue, text=""):
+    """语音留言第二步:POST /voice/message(联系方式必填 + 音频 → Slack)。返回 (状态码, resp)。"""
+    fields = {"session_id": sid, "contact_type": ctype, "contact_value": cvalue,
+              "text": text, "page_url": "https://gmic.ai/"}
+    return _post_multipart("/voice/message", fields, wav)
 
 
 # 坏邮箱"点破"关键词(中英)。命中任一即认为 bot 表达了"这不完整/请重发"。
@@ -352,7 +349,7 @@ def main():
     ok("混合会话:中文问 -> 中文回", has_cjk(rep), rep)
 
     # =================================================================
-    hr("4. 语音链路 — 中英文 (Voice, SAPI 合成)")
+    hr("4. 语音留言 — 独立功能 (Voice message, SAPI 合成)")
     # =================================================================
     if a.no_voice:
         skip("全部语音用例", "--no-voice")
@@ -360,52 +357,58 @@ def main():
         skip("全部语音用例", "非 Windows")
     else:
         tmp = tempfile.gettempdir()
+        en_wav = os.path.join(tmp, "vm_en.wav")
+        zh_wav = os.path.join(tmp, "vm_zh.wav")
+        have_en = sapi_wav("Hi, I need two thousand custom AI voice recorders for my company.", en_wav, culture="en-US")
+        have_zh = sapi_wav("你好,我想定制两千个人工智能录音麦克风。", zh_wav, culture="zh-CN")
 
-        sub("4.1 英文真实语音 -> (两步)转写 + 回复")
-        wav = os.path.join(tmp, "ft_en.wav")
-        if sapi_wav("Hello, I want to order two thousand AI voice recorders for my company.",
-                    wav, culture="en-US"):
-            st, tr, rep, _ = voice_two_step("v_en", wav)
-            ok("EN 语音 200 + 转写非空(第一步就返回,可先上屏)", st == 200 and bool(tr), tr)
-            ok("EN 语音第二步 /reply 有回复", bool(rep), rep)
-            info("EN 语音回复", rep)
+        sub("4.1 /voice/transcribe 英文 -> 转写非空(浮窗预览用)")
+        if have_en:
+            st, tr = vm_transcribe(en_wav)
+            ok("EN transcribe 200 + 转写非空", st == 200 and bool(tr), tr)
         else:
-            skip("英文语音", "SAPI 合成失败")
+            skip("英文 transcribe", "SAPI 合成失败")
 
-        sub("4.2 中文真实语音 -> (两步)转写 + 中文回复")
-        wav = os.path.join(tmp, "ft_zh.wav")
-        if sapi_wav("你好,我想定制两千个人工智能录音麦克风。", wav, culture="zh-CN"):
-            st, tr, rep, _ = voice_two_step("v_zh", wav)
-            ok("ZH 语音 200 + 转写非空", st == 200 and bool(tr), tr)
-            ok("ZH 语音 -> 中文回复", has_cjk(rep), rep)
-            info("ZH 语音回复", rep)
+        sub("4.2 /voice/transcribe 中文 -> 中文转写")
+        if have_zh:
+            st, tr = vm_transcribe(zh_wav)
+            ok("ZH transcribe 200 + 中文转写", st == 200 and has_cjk(tr), tr)
         else:
-            skip("中文语音", "无 zh-CN 嗓音或合成失败")
+            skip("中文 transcribe", "无 zh-CN 嗓音")
 
-        sub("4.3 语音说邮箱(ASR 易听错 -> 应触发 readback/点破,不脑补)")
-        wav = os.path.join(tmp, "ft_email.wav")
-        if sapi_wav("My email is sarah at gmic dot a i.", wav, culture="en-US"):
-            st, tr, rep, _ = voice_two_step("v_email", wav)
-            info("语音邮箱转写结果(ASR 常听错)", tr)
-            info("bot 对语音邮箱的回复(应 readback 或要求重打,不脑补)", rep)
-            ok("语音邮箱用例 200 + 有回复", st == 200 and bool(rep))
+        sub("4.3 /voice/message 合法 email + 音频 -> 200 ok(建线索卡)")
+        if have_en:
+            st, d = vm_message("vm_ok_email", en_wav, "email", "buyer@acme.com", text="Need 2000 recorders")
+            ok("合法 email 留言 -> 200 ok", st == 200 and (d or {}).get("ok") is True, d)
         else:
-            skip("语音邮箱", "SAPI 合成失败")
+            skip("合法 email 留言", "SAPI 合成失败")
 
-        sub("4.4 垃圾音频 -> /voice 直接兜底(transcript 空,不进第二步)不 500")
-        g = os.path.join(tmp, "ft_garbage.wav")
-        with open(g, "wb") as f:
-            f.write(os.urandom(2000))
-        st, tr, rep, _ = voice_two_step("v_garbage", g)
-        ok("垃圾音频 -> 200 + transcript 空 + 兜底话术",
-           st == 200 and tr == "" and bool(rep), rep)
+        sub("4.4 ⭐ /voice/message 联系方式服务端 gate(题眼)")
+        if have_en:
+            st, _ = vm_message("vm_bad", en_wav, "email", "bob(at)acme")     # 坏邮箱
+            ok("坏 email -> 400(服务端拦截)", st == 400, st)
+            st, _ = vm_message("vm_empty", en_wav, "email", "   ")          # 空值
+            ok("空联系方式 -> 400", st == 400, st)
+            st, _ = vm_message("vm_shortphone", en_wav, "phone", "123")     # 位数不足
+            ok("坏 phone -> 400", st == 400, st)
+            st, _ = vm_message("vm_wa", en_wav, "whatsapp", "+1 650 555 1234")  # 合法 IM
+            ok("合法 whatsapp -> 200", st == 200, st)
+        else:
+            skip("联系方式 gate", "SAPI 合成失败")
 
-        sub("4.5 超大文件 -> 413")
-        big = os.path.join(tmp, "ft_big.wav")
+        sub("4.5 /voice/message 缺 contact 字段 -> 422(Pydantic)")
+        if have_en:
+            st, _ = _post_multipart("/voice/message", {"session_id": "vm_missing"}, en_wav)
+            ok("缺 contact_type/value -> 422", st == 422, st)
+        else:
+            skip("缺字段校验", "SAPI 合成失败")
+
+        sub("4.6 超大文件 -> 413")
+        big = os.path.join(tmp, "vm_big.wav")
         with open(big, "wb") as f:
             f.write(b"\0" * 9_000_000)
-        st, _ = _post_multipart("/voice", {"session_id": "v_big"}, big)
-        ok("超大文件 -> 413", st == 413, st)
+        st, _ = _post_multipart("/voice/transcribe", {}, big)
+        ok("transcribe 超大 -> 413", st == 413, st)
 
     # =================================================================
     hr("结果汇总")
