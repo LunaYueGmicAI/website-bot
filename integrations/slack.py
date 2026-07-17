@@ -57,6 +57,21 @@ def _card_text(session):
     email = lead.get("email")
     phone = lead.get("phone")
     messengers = lead.get("messengers") or []
+
+    # ⭐ 语音留言卡【精简】:它没有对话/意图分析(纯留言),团队要的就是"怎么联系 + 说了啥 + 原音频"。
+    #   所以只留联系方式(有哪个显示哪个)+ Message(=转写),原音频在 thread 里。不塞 Name/Source/Missing。
+    if is_voice:
+        lines = [header]
+        if email:
+            lines.append(f"• Email: {email}")
+        if phone:
+            lines.append(f"• Phone: {phone}")
+        if messengers:
+            lines.append(f"• Messengers: {', '.join(messengers)}")
+        lines.append(f"• Message: {lead.get('need') or '(see audio in thread)'}")   # need 存的是转写
+        return "\n".join(lines)
+
+    # ↓↓↓ 聊天线索卡(完整版):Entry/Email/Phone/Messengers/Name/Need/Source/Missing
     parts = [
         header,
         f"• Entry: {entry_display}",

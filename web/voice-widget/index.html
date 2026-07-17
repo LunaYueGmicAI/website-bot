@@ -7,14 +7,15 @@
 <style>
   /* ============================================================
      GMIC 语音留言组件(独立页 /voice-widget/)。精巧小浮窗,以【音条】为主角。
-     交互:点小麦克风 → 弹小浮窗 → 长按录音(浮动波条起伏)→ 底部填 email(必填)→ 发送。
-     设计要点(Luna 2026-07-17 定):浮窗精巧不臃肿;波条是浮动波条【不套方框】,一开始就是
-       一条静止的横线让用户看懂"这里是说话的地方",说话才起伏;联系方式只留 email 一个输入框
-       放最下面;不做转写预览(多余)。将来 gmic.ai 的 fabMic 长按即可打开本页(iframe/浮层)。
-     后端:POST /voice/transcribe(本页不用)、POST /voice/message(发送:email 必填 → Slack)。
+     交互(Luna 2026-07-17 定 · 方案A):长按麦克风 → 开浮窗并【开始录】;松手 = 暂停(不结束);
+       再长按 = 接着录(同一段音频,静音不进);底部填 email(必填);点【发送】才真正结束+上传。
+       靠 MediaRecorder.pause()/resume() 实现"停顿后接着说"。
+     设计:浮窗精巧;音条=浮动波条【不套方框】,开局一条静止横线(让人看懂说话区),说话才起伏;
+       联系方式只留 email 一个输入框放底部;不做转写预览(后端仍自转填 Slack 卡)。
+     主色对齐 gmic.ai 官网蓝 #2563eb。将来 gmic.ai fabMic 长按即可打开本页。
      ============================================================ */
   :root {
-    --accent: #4f46e5; --accent-ink: #fff; --bg: #ffffff; --panel: #f5f6f9;
+    --accent: #2563eb; --accent-ink: #fff; --bg: #ffffff; --panel: #f5f6f9;
     --text: #1f2430; --muted: #7a8194; --border: #e3e6ef; --danger: #e5484d;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
@@ -24,41 +25,38 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: transparent; }
 
-  /* 页面:居中一个"点我说话"的小麦克风(将来由 gmic.ai fabMic 代劳) */
   #stage { height: 100vh; display: flex; align-items: center; justify-content: center; }
   #launcher { display: flex; flex-direction: column; align-items: center; gap: 10px; cursor: pointer;
-    color: var(--muted); font-size: 13px; background: none; border: none; font-family: inherit; }
+    color: var(--muted); font-size: 13px; background: none; border: none; font-family: inherit;
+    user-select: none; -webkit-user-select: none; touch-action: none; }
   #launcher .fab { width: 62px; height: 62px; border-radius: 50%; background: var(--accent); color: #fff;
-    display: grid; place-items: center; font-size: 26px; box-shadow: 0 8px 22px rgba(79,70,229,.4); }
+    display: grid; place-items: center; font-size: 26px; box-shadow: 0 8px 22px rgba(37,99,235,.4); }
 
-  /* 浮窗:精巧小卡片(不铺满屏) */
   .ov { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center;
     background: rgba(15,17,24,.42); backdrop-filter: blur(2px); padding: 16px; }
   .ov.show { display: flex; }
   .card { width: 100%; max-width: 300px; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 18px; box-shadow: 0 16px 50px rgba(0,0,0,.28); padding: 14px 16px 16px;
-    animation: pop .16s ease-out; }
+    border-radius: 18px; box-shadow: 0 16px 50px rgba(0,0,0,.28); padding: 14px 16px 16px; animation: pop .16s ease-out; }
   @keyframes pop { from { transform: scale(.96); opacity: .5; } to { transform: none; opacity: 1; } }
 
   .hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
   .hd .t { font-size: 13.5px; font-weight: 650; color: var(--text); }
   .x { border: none; background: none; color: var(--muted); font-size: 17px; cursor: pointer; line-height: 1; }
 
-  /* ⭐ 浮动波条:不套方框,透明背景;开局一条静止横线,说话才起伏 */
-  #wave { display: block; width: 100%; height: 46px; margin: 6px 0 2px; }
-
-  .status { text-align: center; font-size: 12px; color: var(--muted); min-height: 16px; margin-bottom: 8px; }
+  /* ⭐ 浮动波条:不套方框,透明背景;开局静止横线,说话才起伏 */
+  #wave { display: block; width: 100%; height: 46px; margin: 8px 0 2px; }
+  .status { text-align: center; font-size: 12px; color: var(--muted); min-height: 16px; margin-bottom: 10px; }
   .status.rec { color: var(--danger); font-weight: 600; }
+  .status.bad { color: var(--danger); }
 
-  /* 长按说话的圆麦克风 */
-  #mic { width: 100%; padding: 12px; border-radius: 13px; border: 1px solid var(--border); background: var(--panel);
-    color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; user-select: none; -webkit-user-select: none;
-    touch-action: none; display: flex; align-items: center; justify-content: center; gap: 8px; }
-  #mic .m { font-size: 18px; }
+  /* 圆麦克风:长按录音/续录(不是"Hold to talk"文字条,就是个话筒) */
+  .mic-wrap { display: flex; justify-content: center; margin-bottom: 4px; }
+  #mic { width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--border); background: var(--panel);
+    color: var(--accent); font-size: 26px; cursor: pointer; user-select: none; -webkit-user-select: none;
+    touch-action: none; display: grid; place-items: center; }
   #mic.rec { background: var(--danger); color: #fff; border-color: var(--danger); animation: pulse 1.3s infinite; }
-  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(229,72,77,.5); } 70% { box-shadow: 0 0 0 9px rgba(229,72,77,0); } 100% { box-shadow: 0 0 0 0 rgba(229,72,77,0); } }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(229,72,77,.5); } 70% { box-shadow: 0 0 0 10px rgba(229,72,77,0); } 100% { box-shadow: 0 0 0 0 rgba(229,72,77,0); } }
 
-  /* email:唯一联系方式,单个输入框,放最下面 */
   .em-lbl { font-size: 11px; color: var(--muted); margin: 12px 0 5px; }
   .em-lbl b { color: var(--danger); }
   #email { width: 100%; padding: 10px 12px; font-size: 14px; font-family: inherit; border: 1px solid var(--border);
@@ -77,7 +75,7 @@
 </head>
 <body>
 <div id="stage">
-  <button id="launcher"><span class="fab">🎙️</span>Tap to leave a voice message</button>
+  <button id="launcher"><span class="fab">🎙️</span>Hold to leave a voice message</button>
 </div>
 
 <div class="ov" id="ov">
@@ -87,8 +85,8 @@
 
       <!-- ⭐ 音条:主角。浮动波条,开局静止横线 -->
       <canvas id="wave"></canvas>
-      <div class="status" id="status">Hold the button and speak</div>
-      <button id="mic"><span class="m">🎤</span><span id="micLabel">Hold to talk</span></button>
+      <div class="status" id="status">Hold the mic and speak</div>
+      <div class="mic-wrap"><button id="mic">🎤</button></div>
 
       <!-- email:唯一联系方式,单框,放最下面 -->
       <div class="em-lbl">Your email <b>*</b> — so we can reply</div>
@@ -101,136 +99,134 @@
 </div>
 
 <script>
-/* 独立语音组件。后端:POST /voice/message(multipart:session_id, contact_type=email, contact_value, audio)。同源相对路径。 */
+/* 独立语音组件。后端 POST /voice/message(multipart:session_id, contact_type=email, contact_value, audio)。同源。
+   录音模型(方案A):长按=录/续录,松手=暂停(recorder.pause),发送=结束(recorder.stop)+上传。
+   一个 MediaRecorder + 一条 stream 全程复用;pause/resume 把多段说话拼成一段干净音频(暂停期不录)。 */
 const API = (window.GMIC_BOT_API || "").replace(/\/$/, "");
 const $ = (id) => document.getElementById(id);
-const ov = $("ov"), card = $("card"), body = $("body"),
-      waveEl = $("wave"), statusEl = $("status"), micBtn = $("mic"), micLabel = $("micLabel"),
-      emailEl = $("email"), emHint = $("emHint"), sendBtn = $("send");
+const ov = $("ov"), body = $("body"), waveEl = $("wave"), statusEl = $("status"),
+      micBtn = $("mic"), launcher = $("launcher"), emailEl = $("email"), emHint = $("emHint"), sendBtn = $("send");
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const MAX_REC_MS = 60000;
+const MAX_REC_MS = 120000;   // 累计录音上限 2 分钟(留言够用;后端 8MB 兜底)
 
-let recording = false, recorder = null, chunks = [], stream = null, mime = "audio/webm";
-let audioBlob = null;
+let recState = "idle";       // idle | recording | paused
+let holding = false;         // 手指/鼠标是否正按住(处理首次授权期间就松手的竞态)
+let recorder = null, stream = null, chunks = [], mime = "audio/webm", audioBlob = null;
 let audioCtx = null, analyser = null, waveOn = false, raf = 0;
-let t0 = 0, maxTimer = 0, downAt = 0;
+let segStart = 0, elapsedMs = 0;   // elapsedMs=累计已录毫秒(跨暂停);segStart=本段起点
 
-// ---- 开/关浮窗 ----
-$("launcher").addEventListener("click", openModal);
+// ---------- 开/关浮窗 ----------
+// 长按 launcher:开浮窗 + 立刻开始录(同一个手势)
+launcher.addEventListener("pointerdown", (e) => { e.preventDefault(); openModal(); holdStart(); });
 $("close").addEventListener("click", closeModal);
 ov.addEventListener("click", (e) => { if (e.target === ov) closeModal(); });
 
 function openModal() {
-  audioBlob = null; emailEl.value = ""; emHint.textContent = ""; emHint.className = "em-hint";
-  statusEl.textContent = "Hold the button and speak"; statusEl.className = "status";
-  micLabel.textContent = "Hold to talk";
+  audioBlob = null; recState = "idle"; elapsedMs = 0; chunks = [];
+  emailEl.value = ""; emHint.textContent = ""; emHint.className = "em-hint";
+  setStatus("Hold the mic and speak", "");
+  micUI();
   ov.classList.add("show");
-  startWaveLoop();          // ⭐ 浮窗一打开就画波条(静止横线),让用户看懂这里是说话的地方
+  startWaveLoop();          // 一开就画音条(静止横线)
   updateSend();
 }
 function closeModal() {
-  if (recording) stopRec();
-  stopWaveLoop();
+  holding = false;
+  try { if (recorder && recState !== "idle") recorder.stop(); } catch (e) {}
+  teardownStream(); stopWaveLoop();
+  recState = "idle";
   ov.classList.remove("show");
 }
 
-// ---- email 校验 ----
+// ---------- email 校验 ----------
 function emailValid() { return EMAIL_RE.test(emailEl.value.trim()); }
-function updateSend() { sendBtn.disabled = !(emailValid() && audioBlob); }
+function recorded() { return elapsedMs >= 500; }          // 至少录到 0.5s 才算有内容
+function updateSend() { sendBtn.disabled = !(emailValid() && recorded() && recState !== "recording"); }
 emailEl.addEventListener("input", () => {
-  if (!emailEl.value.trim()) { emHint.textContent = ""; emHint.className = "em-hint"; }
-  else if (emailValid()) { emHint.textContent = ""; emHint.className = "em-hint"; }
+  if (!emailEl.value.trim() || emailValid()) { emHint.textContent = ""; emHint.className = "em-hint"; }
   else { emHint.textContent = "That doesn't look like a valid email."; emHint.className = "em-hint bad"; }
   updateSend();
 });
 
-// ---- 长按录音(pointer 统一触摸/鼠标)----
-micBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); startRec(); });
-window.addEventListener("pointerup", () => { if (recording) stopRec(); });
-window.addEventListener("pointercancel", () => { if (recording) stopRec(); });
+// ---------- 长按录音/续录(pointer 统一触摸/鼠标)----------
+micBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); holdStart(); });
+window.addEventListener("pointerup", holdEnd);
+window.addEventListener("pointercancel", holdEnd);
 
-async function startRec() {
-  if (recording) return;
-  if (!navigator.mediaDevices || !window.MediaRecorder) { statusEl.textContent = "Voice not supported in this browser."; return; }
+async function ensureStream() {
+  if (stream) return true;
+  if (!navigator.mediaDevices || !window.MediaRecorder) { setStatus("Voice not supported in this browser.", "bad"); return false; }
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (e) { statusEl.textContent = "Please allow microphone access."; statusEl.className = "status bad"; return; }
-
-  chunks = []; audioBlob = null; updateSend();
-  recorder = new MediaRecorder(stream); mime = recorder.mimeType || "audio/webm";
-  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-  recorder.onstop = onRecStop;
-  recorder.start();
-
-  recording = true; downAt = Date.now(); t0 = Date.now();
-  micBtn.classList.add("rec"); micLabel.textContent = "Release to finish";
-  statusEl.className = "status rec"; tick();
-  connectAnalyser(stream);      // 让波条接上真实音量开始起伏
-  maxTimer = setTimeout(() => { if (recording) stopRec(); }, MAX_REC_MS);
-}
-function stopRec() {
-  if (!recording) return;
-  recording = false; clearTimeout(maxTimer);
-  micBtn.classList.remove("rec"); micLabel.textContent = "Hold to talk";
-  try { recorder.stop(); } catch (e) {}
-}
-function onRecStop() {
-  disconnectAnalyser();          // 断开分析器 → 波条回到静止横线
-  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
-  const held = Date.now() - downAt;
-  if (held < 400 || !chunks.length) { statusEl.textContent = "Too short — hold and speak."; statusEl.className = "status bad"; return; }
-  audioBlob = new Blob(chunks, { type: mime });
-  const secs = Math.round(held / 1000);
-  statusEl.textContent = `Recorded ✓ ${secs}s · hold again to redo`; statusEl.className = "status";
-  updateSend();
-}
-function tick() {
-  if (!recording) return;
-  const s = Math.floor((Date.now() - t0) / 1000);
-  statusEl.textContent = `● Recording ${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-  setTimeout(tick, 250);
-}
-
-/* ============================================================
-   ⭐ 浮动波条:透明背景、无方框。浮窗一开就跑这个循环:
-   - 没在录音 → 画一条静止的横线(所有波条压到最矮),让用户看懂这里是说话区;
-   - 录音中  → 用 AnalyserNode 的音量数据让波条起伏。
-   ============================================================ */
-function startWaveLoop() { if (waveOn) return; waveOn = true; drawWave(); }
-function stopWaveLoop() { waveOn = false; if (raf) cancelAnimationFrame(raf), raf = 0; }
-function connectAnalyser(stream) {
+  catch (e) { setStatus("Please allow microphone access.", "bad"); return false; }
+  // 音条分析器(整条 stream 复用)
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const src = audioCtx.createMediaStreamSource(stream);
     analyser = audioCtx.createAnalyser(); analyser.fftSize = 128; src.connect(analyser);
-  } catch (e) { /* 波条失败不影响录音 */ }
+  } catch (e) { /* 音条失败不影响录音 */ }
+  return true;
 }
-function disconnectAnalyser() {
-  if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
-  analyser = null;
+
+async function holdStart() {
+  if (recState === "recording") return;
+  holding = true;
+  if (!(await ensureStream())) { holding = false; return; }
+  if (!holding) return;                 // 首次授权弹窗期间用户已松手 → 不开始(等下次长按)
+  if (recState === "idle") {            // 第一段:新建 recorder 开录
+    chunks = [];
+    recorder = new MediaRecorder(stream); mime = recorder.mimeType || "audio/webm";
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.onstop = onStopped;
+    recorder.start();
+  } else if (recState === "paused") {   // 续录:同一 recorder resume(接着拼)
+    try { recorder.resume(); } catch (e) {}
+  }
+  recState = "recording"; segStart = Date.now();
+  micUI(); tick(); updateSend();
+  clearTimeout(holdStart._max);
+  holdStart._max = setTimeout(() => { if (recState === "recording") { holding = false; holdEnd(); } }, MAX_REC_MS - elapsedMs);
 }
+
+function holdEnd() {
+  holding = false;
+  if (recState !== "recording") return;
+  try { recorder.pause(); } catch (e) {}
+  elapsedMs += Date.now() - segStart;
+  recState = "paused";
+  clearTimeout(holdStart._max);
+  micUI();
+  if (recorded()) setStatus(`Paused ${fmt(elapsedMs)} · hold mic to add, or Send`, "");
+  else setStatus("Too short — hold the mic and speak.", "bad");
+  updateSend();
+}
+
+function micUI() { micBtn.classList.toggle("rec", recState === "recording"); }
+function fmt(ms) { const s = Math.floor(ms / 1000); return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; }
+function setStatus(t, cls) { statusEl.textContent = t; statusEl.className = "status" + (cls ? " " + cls : ""); }
+function tick() {
+  if (recState !== "recording") return;
+  setStatus(`● Recording ${fmt(elapsedMs + (Date.now() - segStart))}`, "rec");
+  setTimeout(tick, 250);
+}
+
+// ---------- 音条:浮动波条,静止横线 → 说话起伏 ----------
+function startWaveLoop() { if (waveOn) return; waveOn = true; drawWave(); }
+function stopWaveLoop() { waveOn = false; if (raf) cancelAnimationFrame(raf), raf = 0; }
 function drawWave() {
   if (!waveOn) return;
-  const cv = waveEl, ctx = cv.getContext("2d");
-  const dpr = window.devicePixelRatio || 1;
+  const cv = waveEl, ctx = cv.getContext("2d"), dpr = window.devicePixelRatio || 1;
   if (cv.width !== Math.round(cv.clientWidth * dpr)) { cv.width = Math.round(cv.clientWidth * dpr); cv.height = Math.round(cv.clientHeight * dpr); }
   const W = cv.width, H = cv.height, mid = H / 2;
   ctx.clearRect(0, 0, W, H);
   const bars = 32, gap = W / bars, bw = Math.max(2 * dpr, gap * 0.42), minH = 3 * dpr;
-
   let data = null;
-  if (recording && analyser) { data = new Uint8Array(analyser.frequencyBinCount); analyser.getByteFrequencyData(data); }
-
-  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#4f46e5";
+  if (recState === "recording" && analyser) { data = new Uint8Array(analyser.frequencyBinCount); analyser.getByteFrequencyData(data); }
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563eb";
   for (let i = 0; i < bars; i++) {
-    let h = minH;                                            // 默认:静止横线(最矮)
-    if (data) {
-      const v = data[Math.floor(i * data.length / bars)] / 255;   // 0..1 音量
-      h = Math.max(minH, v * (H - 4 * dpr));
-    }
-    const x = i * gap + (gap - bw) / 2;
-    // 圆角竖条,以中线为中心上下对称(像声波)
-    const r = bw / 2;
+    let h = minH;
+    if (data) { const v = data[Math.floor(i * data.length / bars)] / 255; h = Math.max(minH, v * (H - 4 * dpr)); }
+    const x = i * gap + (gap - bw) / 2, r = bw / 2;
     ctx.beginPath();
     ctx.roundRect ? ctx.roundRect(x, mid - h / 2, bw, h, r) : ctx.rect(x, mid - h / 2, bw, h);
     ctx.fill();
@@ -238,14 +234,30 @@ function drawWave() {
   raf = requestAnimationFrame(drawWave);
 }
 
-// ---- 发送(email 必填 + 有录音才能点)----
-sendBtn.addEventListener("click", async () => {
+function teardownStream() {
+  if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+  analyser = null;
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+}
+
+// ---------- 发送:停止录音(结束)→ 拿到完整音频 → 上传 ----------
+let pendingSend = false;
+function onStopped() {
+  audioBlob = new Blob(chunks, { type: mime });
+  if (pendingSend) { pendingSend = false; doUpload(); }
+}
+sendBtn.addEventListener("click", () => {
   if (sendBtn.disabled) return;
   if (!emailValid()) { emHint.textContent = "Please enter a valid email."; emHint.className = "em-hint bad"; return; }
-  if (!audioBlob) { statusEl.textContent = "Please record a message first."; statusEl.className = "status bad"; return; }
+  if (!recorded()) { setStatus("Record a message first.", "bad"); return; }
   sendBtn.disabled = true; sendBtn.textContent = "Sending…";
+  pendingSend = true;
+  try { recorder.stop(); } catch (e) { pendingSend = false; doUpload(); }  // stop → onStopped 里 doUpload
+  recState = "idle";
+});
+
+async function doUpload() {
   try {
-    // 每条语音留言 = 一张独立 Slack 卡:用一次性 session_id,保证卡头标成"语音留言"
     const sid = "voice_" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "_" + Math.floor(Math.random() * 1e6));
     const fd = new FormData();
     fd.append("session_id", sid);
@@ -253,15 +265,15 @@ sendBtn.addEventListener("click", async () => {
     fd.append("contact_value", emailEl.value.trim());
     fd.append("audio", audioBlob, "voice." + extFor(mime));
     fd.append("page_url", document.referrer || location.href);
-    // 注:不传 text —— 前端不做转写(已去除);后端会自己转写一次填进 Slack 卡的 need
+    // 不传 text —— 前端不转写;后端 /voice/message 自己转写填 Slack 卡 need
     const res = await fetch(API + "/voice/message", { method: "POST", body: fd });
     if (!res.ok) throw new Error("/voice/message -> " + res.status);
     showDone(emailEl.value.trim());
   } catch (e) {
     sendBtn.disabled = false; sendBtn.textContent = "Send";
-    statusEl.textContent = "Couldn't send — please try again."; statusEl.className = "status bad";
+    setStatus("Couldn't send — please try again.", "bad");
   }
-});
+}
 
 function extFor(m) {
   if (!m) return "webm";
@@ -272,7 +284,7 @@ function extFor(m) {
 }
 
 function showDone(email) {
-  stopWaveLoop();
+  teardownStream(); stopWaveLoop();
   const ok = document.createElement("div");
   ok.className = "done";
   ok.innerHTML = `<div class="big">✅</div><div class="m2">Voice message sent!<br>We'll reply at <b></b>.</div>`;
