@@ -53,11 +53,15 @@ app.add_middleware(
 # 挂上 api/routes.py 里那组端点
 app.include_router(router)
 
-# 托管前端 widget(web/ 目录)。做成 iframe 独立页:官网用 <iframe src=".../widget/"> 嵌入。
+# 托管前端。做成 iframe 独立页:官网用 <iframe src=".../widget/"> 嵌入。
 # 关键好处:iframe 内文档 origin = 本后端域,fetch /chat /event 属【同源】,本地和生产都不用折腾 CORS。
-# html=True → 访问 /widget/ 自动返回目录里的 index.html。本地打开:http://localhost:8090/widget/
+# ⭐ 2026-07-17 拆分成两个独立端点,各自可单独测:
+#     /widget/        → 聊天(纯文字)      web/index.html
+#     /voice-widget/  → 语音留言(独立组件) web/voice-widget/index.html
+#   (/voice-widget 和后端 API 的 /voice/transcribe、/voice/message 是不同前缀,不冲突。)
 _WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 app.mount("/widget", StaticFiles(directory=_WEB_DIR, html=True), name="widget")
+app.mount("/voice-widget", StaticFiles(directory=os.path.join(_WEB_DIR, "voice-widget"), html=True), name="voice-widget")
 
 
 if __name__ == "__main__":

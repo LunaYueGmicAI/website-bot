@@ -93,16 +93,19 @@ messengers 并集/同平台留最新、`match_our_channels`/`contact_for_channel
 
 > ⭐ 题眼:联系方式必须【打字】且服务端校验,语音只承载需求描述——彻底绕开"语音听错邮箱字母"老坑。
 
-### C2. 语音浮窗手动测(真麦克风,笔记本/手机)
+### C2. 语音组件手动测(真麦克风,笔记本/手机)
 
-自动化测不了麦克风录音 + 音波 UI,需真机在 `web-bot.telalive.us/widget/` 手测:
-1. 点 contacts 行 **🎙️ Voice** → 弹浮窗
-2. **不填联系方式**:发送键应**禁用**(灰)
-3. 选类型(Email/Phone/WhatsApp/WeChat/Telegram)+ 填值:合法显示 "Looks good ✓",坏值显示红字提示
-4. **长按** 🎙️ 按钮:变红脉动 + **实时音波**跳动 + 计时;松手停止
-5. 松手后自动转写 → 文字填进**可编辑框**(可改错)
-6. 联系方式合法 + 有录音 → 发送键亮 → 点发送 → ✅ 成功确认
-7. 去 `#web-bot` 确认卡头是 **🎙️ New VOICE message**(聊天来的是 💬 New CHAT inquiry)
+两个 widget 现已拆成独立端点,各自单独测:
+- 聊天(纯文字):`web-bot.telalive.us/widget/`
+- 语音留言(独立精巧组件):`web-bot.telalive.us/voice-widget/`
+
+自动化测不了麦克风录音 + 音波 UI,需真机在 **`/voice-widget/`** 手测:
+1. 点 🎙️ 小麦克风 → 弹**精巧小浮窗**
+2. 浮窗一打开,音条就是**一条静止的横线**(让人看懂这里是说话区)
+3. **长按** 🎤 按钮:变红脉动 + **音条起伏** + 计时;松手停止(显示 "Recorded ✓ Xs")
+4. **不填 email**:发送键**禁用**(灰);填坏 email 显示红字;填对了才亮
+5. email 合法 + 有录音 → 发送 → ✅ 成功确认
+6. 去 `#web-bot` 确认卡头是 **🎙️ New VOICE message**(need 是后端自动转写的留言内容)
 
 ---
 
