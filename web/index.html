@@ -357,9 +357,13 @@ function extFor(mime) {
   return "webm";
 }
 
+// 【语音两步走】说完 → 第一步 /voice 只转写,拿到就【马上】把"你说的话"上屏(让用户立刻确认
+// 自己被准确识别了)→ 再第二步 /reply 出回复,中间显示打字点。这样转写和答案不会一起冒出来。
 async function uploadVoice(blob, mime) {
-  setBusy(true); const stop = showTyping();
+  setBusy(true);
+  let stop = showTyping();   // 第一段等待:STT 转写中
   try {
+    // ---- 第一步:上传音频,只拿转写 ----
     // 音频走 multipart(不是 JSON);别手动设 Content-Type,浏览器会带 multipart 边界
     const fd = new FormData();
     fd.append("session_id", sessionId);
@@ -367,10 +371,20 @@ async function uploadVoice(blob, mime) {
     fd.append("page_url", document.referrer || location.href);
     const res = await fetch(API + "/voice", { method: "POST", body: fd });
     if (!res.ok) throw new Error("/voice -> " + res.status);
-    const r = await res.json();
+    const v = await res.json();
+    stop();   // 转写回来了,先撤掉打字点
+
+    // 听不清/静音:后端回了兜底 reply、transcript 为空 → 显示一条 bot 兜底气泡,到此为止
+    if (!v.transcript) { addBubble("bot", v.reply || "Sorry, I didn't catch that — please try again or type."); setBusy(false); return; }
+
+    // 转写到手 → 立刻当"用户说的话"上屏(此刻 bot 答案还没生成,用户已能看到自己刚说了啥)
+    addBubble("user", v.transcript);
+
+    // ---- 第二步:让后端跑大模型出回复 ----
+    stop = showTyping();   // 第二段等待:LLM 生成回复中
+    const r = await postJSON("/reply", { session_id: sessionId });
     stop();
-    if (r.transcript) addBubble("user", r.transcript);   // 转写出来就当"用户说的"显示
-    addBubble("bot", r.reply || "…");                    // 听不清时 reply=友好提示
+    addBubble("bot", r.reply || "…");
     renderThrowbacks(r.contacts);   // 语音里报了 IM 时,同样甩直连入口(和打字一致)
   } catch (e) {
     stop(); addBubble("bot", "Sorry, I couldn't process that audio — please try again or type.");

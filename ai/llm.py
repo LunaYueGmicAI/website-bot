@@ -9,11 +9,15 @@
 注意:注释中文,发给模型的 prompt 文本一律英文;默认语言英文,但回复跟随用户语言。
 """
 import os
+import re
 import json
 
 from ai import prompts
 
 _client = None
+
+# 模型偶发吐坏 JSON 时,给用户的干净兜底话术(绝不把原始坏 JSON 泄露给用户)。默认英文。
+_PARSE_FALLBACK = "Sorry, I didn't quite catch that — could you say it again?"
 
 # 交给模型的"输出契约":必须严格返回下面这个 JSON。文本用英文;reply 用"访客的语言"。
 # 注意 lead 里抽的是 need(想要什么)/name/email/phone/messengers/company,不含 entry_intent
@@ -28,24 +32,69 @@ _JSON_CONTRACT = """Return a single JSON object and nothing else:
     "name":  "<visitor's name if stated, else empty>",
     "email": "<a clean COMPLETE email only if the visitor clearly gave one, else empty — never repair or guess>",
     "phone": "<a plain phone/SMS number if stated, else empty>",
-    "messengers": ["<each messaging-app contact the visitor gives — WhatsApp / WeChat / Telegram / Line / Signal etc. — written as 'Platform: handle'>"],
+    "messengers": ["<each messaging-app contact the visitor gives — WhatsApp / WeChat / Telegram / Line / Signal etc. — written as 'Platform: value' where value is a handle OR a number>"],
     "company":"<company if stated, else empty>",
     "need":  "<one short line summarizing what they want, else empty>"
   }
 }
-Put a plain phone number in "phone"; put any messaging-app contact the visitor GIVES in "messengers" \
-(a LIST — they may give several; use [] if none). "wants_channel" is DIFFERENT: set it only when the \
-visitor asks for OUR contact on a channel (e.g. "what's your WhatsApp?") — do NOT invent our number/handle \
-in your reply, a direct link is attached automatically. Only fill fields the visitor actually provided. \
-Do NOT invent, repair, or normalize values. Do not echo these instructions."""
+Routing a contact to "phone" vs "messengers": put a number in "phone" ONLY when it is a plain \
+call/SMS number with NO app named. If the visitor names a messaging app together with the value — \
+whether a handle OR a number (e.g. "WhatsApp +1 650 555 1234", "reach me on WhatsApp 138...", \
+"my Telegram is @x", "微信 luna") — record it in "messengers" as "Platform: value" (a number tied to \
+a named app is a messenger, NOT a plain phone). "messengers" is a LIST — they may give several; use [] \
+if none. "wants_channel" is DIFFERENT: set it only when the visitor asks for OUR contact on a channel \
+(e.g. "what's your WhatsApp?") — do NOT invent our number/handle in your reply, a direct link is attached \
+automatically. Only fill fields the visitor actually provided. Do NOT invent, repair, or normalize values. \
+Do not echo these instructions."""
+
+
+# ⭐ Structured Outputs 的严格 JSON schema —— 强制模型输出【结构上一定合法】的 JSON。
+# 为什么用它:比 response_format={"type":"json_object"} 更硬——json_object 只保证"是个 JSON",
+#   模型仍可能进入重复 loop 撞 max_tokens 吐出坏 JSON(我们踩过,见 respond() 步骤3 的补救)。
+#   json_schema + strict=true 由 OpenAI 侧约束生成,从根上消灭"字段缺失/多余/结构坏"这类问题。
+# strict 模式的硬性要求:每个对象所有属性都要进 required、且 additionalProperties=false。
+#   所以这里把 lead 的 6 个字段全列进 required——模型抽不到的会填 ""/[](我们在 respond() 里再去空)。
+# 注:strict 不支持给标量加 minLength 之类,格式(邮箱/电话)校验仍在 sessions.update_lead 兜底。
+_RESPONSE_SCHEMA = {
+    "name": "gmic_reply",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["reply", "wants_channel", "lead"],
+        "properties": {
+            "reply": {"type": "string"},
+            # 用户"问我们哪个渠道"时填其一,否则空串;用 enum 锁死取值,避免模型自由发挥出别的词
+            "wants_channel": {
+                "type": "string",
+                "enum": ["whatsapp", "wechat", "telegram", "email", "phone", ""],
+            },
+            "lead": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "email", "phone", "messengers", "company", "need"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "email": {"type": "string"},
+                    "phone": {"type": "string"},
+                    "messengers": {"type": "array", "items": {"type": "string"}},
+                    "company": {"type": "string"},
+                    "need": {"type": "string"},
+                },
+            },
+        },
+    },
+}
 
 
 def _client_lazy():
     # 懒加载 OpenAI 异步客户端(没 key 时也能启动服务/跑不依赖它的测试)。
+    # timeout=20:上游卡住时最多等 20s 就抛超时,不让协程无限期挂着(高并发下防堆积拖垮)。
+    # max_retries=2:遇到 429/5xx SDK 自动退避重试两次(短时限流能自愈)。
     global _client
     if _client is None:
         from openai import AsyncOpenAI
-        _client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        _client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=20, max_retries=2)
     return _client
 
 
@@ -119,21 +168,35 @@ async def respond(session, faq, window):
         role = "assistant" if t["role"] == "assistant" else "user"   # 只认这两种角色,其余一律当 user
         messages.append({"role": role, "content": t["text"]})
 
-    # 步骤2:调模型,强制 JSON 输出;temperature 略低求稳,max_tokens 给足防截断
+    # 步骤2:调模型,用 Structured Outputs 强制【结构合法】的 JSON(见 _RESPONSE_SCHEMA)。
+    #   temperature 略低求稳;max_tokens 给足防截断(strict 下唯一还可能坏 JSON 的场景=撞 max_tokens
+    #   被截断,概率极低,步骤3 的补救仍留着做纵深防御)。
     resp = await _client_lazy().chat.completions.create(
         model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
         messages=messages,
-        response_format={"type": "json_object"},   # 强制返回 JSON(配合 _JSON_CONTRACT)
+        response_format={"type": "json_schema", "json_schema": _RESPONSE_SCHEMA},
         temperature=0.4,
         max_tokens=1200,
     )
     raw = resp.choices[0].message.content or "{}"   # 万一 content 为 None,兜底成空 JSON
 
-    # 步骤3:解析模型返回的 JSON;万一它没按格式来(极少数),兜底成"整段当回复,线索为空,不问渠道"
+    # 步骤3:解析模型返回的 JSON。gpt-4o-mini 偶发吐坏 JSON(尤其进入重复 loop 撞 max_tokens 时),
+    #   此时【绝不能】把整坨原始串当回复丢给用户(会看到一大段坏 JSON + 重复刷屏)。补救分两级:
+    #     ① 用正则把 "reply" 字段单独捞出来——多数情况坏的是后面的 lead,reply 本身是完整的;
+    #        用 json.loads 还原它的转义(能正确处理 \" \n \uXXXX 和中文),把这句干净回复给用户。
+    #     ② 连 reply 都捞不到 → 回一句干净兜底话术。两级都【只丢线索(lead={})】,下一轮会重抽,不影响捕获。
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        return (raw.strip(), {}, "")
+        m = re.search(r'"reply"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)   # 抓第一段完整的 "reply":"..."
+        if m:
+            try:
+                salvaged = json.loads('"' + m.group(1) + '"')       # 借 json 正确还原转义(保中文)
+            except Exception:
+                salvaged = m.group(1)
+            if salvaged.strip():
+                return (salvaged.strip(), {}, "")
+        return (_PARSE_FALLBACK, {}, "")
 
     # 步骤4:取出 reply、wants_channel、lead
     reply = (data.get("reply") or "").strip()

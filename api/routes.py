@@ -60,6 +60,13 @@ class ChatReq(BaseModel):
     lang: str | None = None
 
 
+class ReplyReq(BaseModel):
+    # 例:{"session_id":"sess_ab12"}
+    # 用在【语音两步走】的第二步:第一步 /voice 已把转写当"用户这轮说的话"记进会话并立刻返回给前端
+    # 上屏,这一步只负责"跑大模型出回复"。所以这里没有 text——用户说了什么已经在会话的 turns 里了。
+    session_id: str
+
+
 # ======================== 小工具 ========================
 async def _run_llm(sid):
     """
@@ -134,6 +141,27 @@ def _throwbacks(sid, before_messengers, wants_channel):
     if wanted and wanted["id"] not in {c["id"] for c in result}:  # 按 id 去重(两路可能指向同一渠道)
         result.append(wanted)
     return result
+
+
+async def _reply_and_archive(sid):
+    """
+    跑一轮大模型出【回复】+ 归档到 Slack + 算出这轮要甩的直连渠道。
+    【前置】用户这轮说的话必须【已经】append 进 turns 了(打字在 /chat 里 append、语音在 /voice 里 append)。
+    这样本函数只管"生成回复",不重复记用户输入——正是"语音两步走"能共用同一段逻辑的关键。
+
+    步骤:
+      1) 跑模型前先快照当前 messengers(用于第4步比出"这一轮新报的 IM")
+      2) _run_llm:出回复 + 回填 lead/turns(内部带兜底,失败不 500)
+      3) AI 回复发进 Slack thread 归档(🤖 前缀)
+      4) 刷新 Slack 线索卡 + 算甩链(路A 用户留自己的号 / 路B 用户问我们的号)
+    返回:(reply 回复文本, throwbacks 要甩回的直连渠道列表)。
+    """
+    before_msgr = list((STORE.snapshot(sid)["lead"].get("messengers") or []))  # 步1
+    reply, _, wants = await _run_llm(sid)                                       # 步2
+    await slack.post_detail(STORE, sid, f"🤖 {reply}")                          # 步3
+    await slack.update_card(STORE, sid)                                         # 步4
+    throwbacks = _throwbacks(sid, before_msgr, wants)
+    return reply, throwbacks
 
 
 # ======================== 路由 ========================
@@ -226,16 +254,8 @@ async def chat(req: ChatReq):
     # 4) 用户原话发进 Slack thread 做明细归档(👤 前缀标明是访客说的)
     await slack.post_detail(STORE, req.session_id, f"👤 {text}")
 
-    # 5) 调大模型:产出 reply(给用户的回复)+ 顺带抽到的线索;_run_llm 内部已回填 lead/turns 并带兜底。
-    #    调用前先记下当前 messengers,调用后比对出"这一轮新报的 IM"用于甩直连链接(见 step 7b)。
-    before_msgr = list((STORE.snapshot(req.session_id)["lead"].get("messengers") or []))
-    reply, _, wants = await _run_llm(req.session_id)
-    # 6) AI 回复也发进 thread 归档(🤖 前缀标明是 bot 说的)
-    await slack.post_detail(STORE, req.session_id, f"🤖 {reply}")
-    # 7) 刷新线索卡:这轮可能抽到了新 lead(邮箱/need/messenger 等),把卡更新成最新状态
-    await slack.update_card(STORE, req.session_id)
-    # 7b) 甩直连链接:用户报了自己的 IM(新平台)→ 甩;或用户问起我们某渠道(wants)→ 甩
-    throwbacks = _throwbacks(req.session_id, before_msgr, wants)
+    # 5) 跑大模型出回复 + 归档 + 算甩链(打字是即时的,一步返回即可,不像语音要拆两步)。
+    reply, throwbacks = await _reply_and_archive(req.session_id)
     # 产出:{reply: AI 回复, contacts: 要甩回的直连渠道(可能为空)} → 前端显示 bot 气泡 + 直连按钮
     return {"reply": reply, "contacts": throwbacks}
 
@@ -252,48 +272,70 @@ async def voice(
     lang: str | None = Form(None),
 ):
     """
-    用户【发语音】的入口(和 /event 按钮、/chat 打字并列)。走 multipart 上传原始录音。
-    跟 /chat 几乎一样,只是最前面多了一步"转写(STT)",且 Slack 明细里额外带上原始音频。
-    具体每步干啥、产出什么见下面各 step 的注释。
+    用户【发语音】的入口——【语音两步走 · 第一步:只转写,立刻返回】。
+    走 multipart 上传原始录音,做 STT + 归档,把转写【马上】返回给前端上屏("你刚说了啥")。
+    【不在这步跑大模型】——大模型出回复交给第二步 /reply,这样用户说完能立刻看到自己的话被
+    准确识别,而不用干等 LLM 出结果才一起冒出来(否则会觉得"没反应")。
+
+    步骤:
+      0) 读录音字节;超大直接 413(防滥用/爆内存),精确按时长限制在前端做
+      1) 确保会话存在(首次发语音就在这建会话,记来源页 page_url/语言 lang)
+      2) 语音→文字:lang=None 时 Whisper 自动识别语种(多语言核心);STT 失败不 500,当"没转出"处理
+      3) 静音/听不清/失败 → 回兜底话术 + 空 transcript(前端据此显示兜底 bot 气泡,不再调 /reply)
+      4) 转写当"用户这轮说的话"记进 turns(第二步 /reply 跑模型时靠它)
+      5) 确保 Slack 线索卡存在
+      6) 原始音频 + 转写一起发进 thread 归档(🎤;满足"原语音和转文字都进 Slack")
+    产出:{"transcript": 转写文字} —— 前端拿到就立刻当用户气泡上屏,然后再调 /reply 要回复。
     """
-    # 0) 读出录音字节;超大文件直接 413 拒掉(防滥用/爆内存),精确的按时长限制在前端做
-    audio_bytes = await audio.read()
+    # 0) 读录音 + 大小闸门
+    #    ⚠️ 关键:只读到 MAX_AUDIO_BYTES+1 字节就停,而不是无脑 await audio.read() 把整个文件读进内存。
+    #    否则恶意客户端传个几百 MB,会在"拒绝之前"就先把整坨吃进 RAM(高并发下能 OOM 整个进程)。
+    #    读 上限+1 字节:只要拿到的比上限多(哪怕多 1 字节),就说明超了 → 413,内存占用被死死钉在上限。
+    audio_bytes = await audio.read(MAX_AUDIO_BYTES + 1)
     if len(audio_bytes) > MAX_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail="audio too large")
 
-    # 1) 确保会话存在(首次发语音就在这建会话,并记下来源页 page_url、语言 lang 进 meta)
+    # 1) 建/取会话
     STORE.get_or_create(session_id, {"page_url": page_url, "lang": lang})
 
-    # 2) 语音 → 文字:lang=None 时让 Whisper 自动识别语种(多语言核心)。
-    #    STT 失败(Groq 挂/超时)不 500:吞掉异常记 log,当作"没转出文字"处理。
+    # 2) STT(失败吞异常,当没转出)
     try:
         transcript = await stt.transcribe(audio_bytes, filename=audio.filename or "voice.webm",
                                           language=lang or None)
     except Exception:
         log.exception("stt.transcribe failed for session %s", session_id)
         transcript = ""
-    # 3) 静音/听不清/转写失败 → 直接回友好提示(默认英文),别把空字符串硬塞给大模型
+    # 3) 没转出文字 → 直接回兜底(带 reply,前端据此显示一条 bot 气泡,不用再调 /reply)
     if not transcript:
-        return {"reply": STT_FALLBACK_REPLY, "transcript": ""}   # 产出:{兜底话术, transcript:""}
+        return {"transcript": "", "reply": STT_FALLBACK_REPLY}
 
-    # 4) 转写文字当"用户这轮说的话"记进对话(turns),后续滑动窗口能带上
+    # 4) 记进 turns(第二步 /reply 跑模型要用)
     STORE.append_turn(session_id, "user", transcript)
-    # 5) 确保 Slack 有这通对话的线索卡(没有就建)
+    # 5) 线索卡
     await slack.ensure_card(STORE, session_id)
-    # 6) 原始音频 + 转写文字一起发进 thread 归档(🎤 前缀 + 满足"原语音和转文字都进 Slack"的需求)
+    # 6) 原音频 + 转写进 Slack thread 归档
     await slack.post_detail(STORE, session_id, f"🎤 {transcript}", audio_bytes=audio_bytes,
                             filename=audio.filename or "voice.webm")
 
-    # 7) 调大模型:产出 reply + 顺带抽到的线索;_run_llm 内部已回填 lead/turns 并带兜底。
-    #    调用前先记下当前 messengers,调用后比对出"这一轮新报的 IM"用于甩直连链接(见 step 9b)。
-    before_msgr = list((STORE.snapshot(session_id)["lead"].get("messengers") or []))
-    reply, _, wants = await _run_llm(session_id)
-    # 8) AI 回复也发进 thread 归档(🤖 前缀标明是 bot 说的)
-    await slack.post_detail(STORE, session_id, f"🤖 {reply}")
-    # 9) 刷新线索卡:这轮可能抽到了新 lead,把卡更新成最新状态
-    await slack.update_card(STORE, session_id)
-    # 9b) 甩直连链接:用户(用语音)报了自己的 IM(新平台)或问起我们某渠道 → 甩(和 /chat 一致)
-    throwbacks = _throwbacks(session_id, before_msgr, wants)
-    # audio_bytes 只是本次请求的局部变量,函数返回后自动释放,绝不长期驻留内存/磁盘
-    # 产出:{AI 回复 + 这轮转写文字 + 要甩回的直连渠道} → 前端显示
-    return {"reply": reply, "transcript": transcript, "contacts": throwbacks}
+    # audio_bytes 是本次请求局部变量,函数返回后自动释放,绝不长期驻留内存/磁盘
+    # 产出:只回转写,让前端马上上屏;回复由第二步 /reply 生成
+    return {"transcript": transcript}
+
+
+@router.post("/reply")
+async def reply(req: ReplyReq):
+    """
+    【语音两步走 · 第二步:出回复】。第一步 /voice 已把转写记进会话并让前端上屏了,
+    这一步只负责跑大模型出回复 + 归档 + 算甩链。前端在把用户转写上屏后立刻调本端点,
+    于是体验是:说完 → 转写上屏 → 打字点 → bot 回复(而不是两样一起冒出来)。
+
+    为什么单独一个端点而不复用 /chat:/chat 会把 text 当"用户新说的话"再 append 一遍,
+    而语音的用户输入(转写)已经在 /voice 里 append 过了,这里绝不能重复记——所以要一个
+    "只生成回复、不记用户输入"的端点。逻辑体和 /chat 的后半段共用 _reply_and_archive。
+    """
+    # 会话必须已存在(正常是 /voice 刚建的)。不存在 → 400,别对空会话空跑一次模型。
+    if STORE.snapshot(req.session_id) is None:
+        raise HTTPException(status_code=400, detail="unknown session")
+    reply_text, throwbacks = await _reply_and_archive(req.session_id)
+    # 产出:{reply: AI 回复, contacts: 要甩回的直连渠道} → 和 /chat 返回结构一致,前端同一套渲染
+    return {"reply": reply_text, "contacts": throwbacks}

@@ -16,7 +16,9 @@ def _client_lazy():
     global _client
     if _client is None:
         from openai import AsyncOpenAI
-        _client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # timeout=30:转写比对话稍慢(尤其接近 60s 上限的录音),给足 30s;超时抛错由 /voice 兜底成""。
+        # max_retries=2:429/5xx 自动退避重试。
+        _client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=30, max_retries=2)
     return _client
 
 
