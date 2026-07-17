@@ -18,7 +18,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 
 from core import sessions
-from core.widget_config import CONFIG, ACTIONS
+from core.widget_config import CONFIG, ACTIONS, match_our_channels, contact_for_channel
 from ai import stt, llm
 from integrations import slack
 
@@ -52,23 +52,12 @@ class EventReq(BaseModel):
 
 class ChatReq(BaseModel):
     # 例:{"session_id":"sess_ab12","text":"你们支持防水吗","page_url":"/products/"}
+    # 注:原来的"可选邮箱框"已删除(那个框是给语音兜底的拐杖,又和对话记忆打架会被覆盖,
+    #     鸡肋)。现在联系方式一律走对话捕获,不再有 email 搭车字段。
     session_id: str
     text: str
     page_url: str | None = None
     lang: str | None = None
-    # widget 那个"可选邮箱框"填了就带上来(搭车在聊天里)。前端只做轻校验,真正的格式校验在
-    # update_lead 里(不合格不写),所以这里放心收。为空/不带 = 用户没填,不影响。
-    email: str | None = None
-
-
-class LeadReq(BaseModel):
-    # widget 邮箱框的 [Save] 按钮走这:不发聊天也能【立刻】把联系方式存进 lead。
-    # 例:{"session_id":"sess_ab12","email":"buyer@acme.com"}
-    session_id: str
-    email: str | None = None
-    name: str | None = None
-    phone: str | None = None
-    page_url: str | None = None
 
 
 # ======================== 小工具 ========================
@@ -87,15 +76,64 @@ async def _run_llm(sid):
     snap = STORE.snapshot(sid)
     window = STORE.window(sid)
     try:
-        reply, lead = await llm.respond(snap, CONFIG.get("faq", []), window)
+        reply, lead, wants_channel = await llm.respond(snap, CONFIG.get("faq", []), window)
     except Exception:
         log.exception("llm.respond failed for session %s — using fallback reply", sid)
-        reply, lead = LLM_FALLBACK_REPLY, {}
+        reply, lead, wants_channel = LLM_FALLBACK_REPLY, {}, ""
     if lead:
         STORE.update_lead(sid, lead)
     if reply:
         STORE.append_turn(sid, "assistant", reply)
-    return reply, lead
+    return reply, lead, wants_channel
+
+
+def _new_channel_throwbacks(sid, before_messengers):
+    """
+    甩直连链接【触发路 A:用户主动留了自己的号】——只对"这一轮新增的平台"甩,实现"第一次留就甩、
+    之后(补充/纠正)不再烦"。核心手法:比较跑大模型【前后】的 messengers,按【平台】取差集。
+
+    为什么按平台而非整条字符串比:① 模型每轮可能重复抽出同一 handle;② 用户纠正同平台号码时
+    handle 变了但平台没变——两种都不该重复甩。按平台集合比,这两种都会被判成"非新增"。
+
+    ── 输入 ──
+      sid:               会话 id。
+      before_messengers: 跑大模型【之前】lead 里的 messengers 列表(由 /chat、/voice 在调 _run_llm 前快照好传进来)。
+    ── 输出 ──
+      要甩回给用户的 contacts 配置列表(可能为空 [])。
+
+    ── 逐步逻辑(3 个场景对照)──
+      步1  snap = 当前会话快照(跑完模型后的最新状态)
+      步2  after = 现在 lead 里的 messengers        # update_lead 已把这轮新抽到的合并进去(同平台留最新)
+      步3  before_plats = {before 各条的平台}        # 用集合,便于差集
+      步4  fresh = after 里"平台不在 before_plats"的那些   # 只留【本轮新出现的平台】
+      步5  return match_our_channels(fresh)          # 把新增平台对到我们的现成链接
+
+      场景A 首次留(应甩): before=["WeChat: x"](plats={wechat});这轮报了 WhatsApp
+        → after=["WeChat: x","WhatsApp: +1.."] → fresh=["WhatsApp: +1.."](whatsapp∉{wechat})→ 甩 WhatsApp ✅
+      场景B 纠正同平台(不甩): before=["WeChat: old"](plats={wechat});这轮"微信改成 new"
+        → after=["WeChat: new"] → fresh=[](wechat∈before_plats,handle 变了但平台没变)→ 不甩 ✅
+      场景C 只是提到/问(不甩): 用户没留自己的号 → after==before → fresh=[] → 不甩 ✅
+        (注:"问我们的号"是另一条路,见 wants_channel / contact_for_channel。)
+    """
+    snap = STORE.snapshot(sid)                                                       # 步1
+    after = (snap["lead"].get("messengers") or []) if snap else []                   # 步2
+    before_plats = {sessions.messenger_platform(m) for m in before_messengers}       # 步3
+    fresh = [m for m in after if sessions.messenger_platform(m) not in before_plats] # 步4
+    return match_our_channels(fresh)                                                 # 步5
+
+
+def _throwbacks(sid, before_messengers, wants_channel):
+    """
+    汇总这一轮要甩给用户的直连渠道(合并两条触发路,按 contacts id 去重):
+      路 A(用户留了自己的号):_new_channel_throwbacks —— 只对本轮新增平台甩一次。
+      路 B(用户问我们的号):  wants_channel —— 每次问都甩(问了就答,天然不必跨轮去重)。
+    例:用户说"我的 WhatsApp +1..、你们 Telegram 是啥?" → 路A 甩 WhatsApp、路B 甩 Telegram → 两条都回。
+    """
+    result = _new_channel_throwbacks(sid, before_messengers)     # 路 A
+    wanted = contact_for_channel(wants_channel)                  # 路 B:问起就取我们现成的那条
+    if wanted and wanted["id"] not in {c["id"] for c in result}:  # 按 id 去重(两路可能指向同一渠道)
+        result.append(wanted)
+    return result
 
 
 # ======================== 路由 ========================
@@ -181,10 +219,6 @@ async def chat(req: ChatReq):
 
     # 1) 确保会话存在(首次打字就在这建会话,并记下来源页 page_url、语言 lang 进 meta)
     STORE.get_or_create(req.session_id, {"page_url": req.page_url, "lang": req.lang})
-    # 1b) 邮箱框填了就直接记进 lead(不经过大模型抽取);update_lead 内部会校验格式,不合格自动不写。
-    #     这是"追问 + 邮箱框"双保险里的邮箱框那一路:用户懒得在对话里说,填个框也能留下联系方式。
-    if req.email:
-        STORE.update_lead(req.session_id, {"email": req.email})
     # 2) 把用户这句记进对话(turns),后续滑动窗口喂给模型时能带上
     STORE.append_turn(req.session_id, "user", text)
     # 3) 确保 Slack 有这通对话的线索卡(没有就建,根消息 ts 存进会话)
@@ -192,35 +226,22 @@ async def chat(req: ChatReq):
     # 4) 用户原话发进 Slack thread 做明细归档(👤 前缀标明是访客说的)
     await slack.post_detail(STORE, req.session_id, f"👤 {text}")
 
-    # 5) 调大模型:产出 reply(给用户的回复)+ 顺带抽到的线索;_run_llm 内部已回填 lead/turns 并带兜底
-    reply, _ = await _run_llm(req.session_id)
+    # 5) 调大模型:产出 reply(给用户的回复)+ 顺带抽到的线索;_run_llm 内部已回填 lead/turns 并带兜底。
+    #    调用前先记下当前 messengers,调用后比对出"这一轮新报的 IM"用于甩直连链接(见 step 7b)。
+    before_msgr = list((STORE.snapshot(req.session_id)["lead"].get("messengers") or []))
+    reply, _, wants = await _run_llm(req.session_id)
     # 6) AI 回复也发进 thread 归档(🤖 前缀标明是 bot 说的)
     await slack.post_detail(STORE, req.session_id, f"🤖 {reply}")
-    # 7) 刷新线索卡:这轮可能抽到了新 lead(邮箱/need 等),把卡更新成最新状态
+    # 7) 刷新线索卡:这轮可能抽到了新 lead(邮箱/need/messenger 等),把卡更新成最新状态
     await slack.update_card(STORE, req.session_id)
-    return {"reply": reply}   # 产出:{"reply": AI 回复} → 前端(P3)取 reply 显示成 bot 气泡
+    # 7b) 甩直连链接:用户报了自己的 IM(新平台)→ 甩;或用户问起我们某渠道(wants)→ 甩
+    throwbacks = _throwbacks(req.session_id, before_msgr, wants)
+    # 产出:{reply: AI 回复, contacts: 要甩回的直连渠道(可能为空)} → 前端显示 bot 气泡 + 直连按钮
+    return {"reply": reply, "contacts": throwbacks}
 
 
-@router.post("/lead")
-async def lead(req: LeadReq):
-    """
-    直接提交联系方式(widget 邮箱框的 [Save] 按钮走这)。不经过大模型。
-    解决的坑:邮箱框以前只能"搭车"在下一条聊天里发,用户不聊天就永远收不到 → 这里给一条独立通道。
-    """
-    # 至少要带一个字段,否则没意义 → 400
-    fields = {k: v for k, v in {"email": req.email, "name": req.name, "phone": req.phone}.items() if v}
-    if not fields:
-        raise HTTPException(status_code=400, detail="no lead fields")
-
-    # 确保会话存在 → 合并进 lead(update_lead 内部校验 email/phone 格式,不合格自动不写)→ 刷 Slack 卡
-    STORE.get_or_create(req.session_id, {"page_url": req.page_url})
-    STORE.update_lead(req.session_id, fields)
-    await slack.ensure_card(STORE, req.session_id)
-    await slack.update_card(STORE, req.session_id)
-
-    # 回执:告诉前端每个字段【实际是否存进去了】(校验没过的不会出现),前端据此显示 ✓ 或"邮箱看着不对"
-    saved = STORE.snapshot(req.session_id)["lead"]
-    return {"ok": True, "saved": {k: saved.get(k) for k in fields if saved.get(k)}}
+# 注:原 POST /lead 端点已删除。它只服务于 widget 的"邮箱框 Save"按钮,那个框已连同一起去掉
+#     (鸡肋 + 和对话记忆打架会被覆盖)。联系方式现在全走对话捕获(/chat、/voice)。
 
 
 @router.post("/voice")
@@ -263,11 +284,16 @@ async def voice(
     await slack.post_detail(STORE, session_id, f"🎤 {transcript}", audio_bytes=audio_bytes,
                             filename=audio.filename or "voice.webm")
 
-    # 7) 调大模型:产出 reply + 顺带抽到的线索;_run_llm 内部已回填 lead/turns 并带兜底
-    reply, _ = await _run_llm(session_id)
+    # 7) 调大模型:产出 reply + 顺带抽到的线索;_run_llm 内部已回填 lead/turns 并带兜底。
+    #    调用前先记下当前 messengers,调用后比对出"这一轮新报的 IM"用于甩直连链接(见 step 9b)。
+    before_msgr = list((STORE.snapshot(session_id)["lead"].get("messengers") or []))
+    reply, _, wants = await _run_llm(session_id)
     # 8) AI 回复也发进 thread 归档(🤖 前缀标明是 bot 说的)
     await slack.post_detail(STORE, session_id, f"🤖 {reply}")
     # 9) 刷新线索卡:这轮可能抽到了新 lead,把卡更新成最新状态
     await slack.update_card(STORE, session_id)
+    # 9b) 甩直连链接:用户(用语音)报了自己的 IM(新平台)或问起我们某渠道 → 甩(和 /chat 一致)
+    throwbacks = _throwbacks(session_id, before_msgr, wants)
     # audio_bytes 只是本次请求的局部变量,函数返回后自动释放,绝不长期驻留内存/磁盘
-    return {"reply": reply, "transcript": transcript}   # 产出:{AI 回复 + 这轮转写文字} → 前端显示
+    # 产出:{AI 回复 + 这轮转写文字 + 要甩回的直连渠道} → 前端显示
+    return {"reply": reply, "transcript": transcript, "contacts": throwbacks}

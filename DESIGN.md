@@ -43,7 +43,10 @@ talking both land in the **same free AI conversation** (voice just goes through 
 session[session_id] = {
   created_at, last_seen,                 # for TTL / LRU
   entry_intent: "odm" | null,            # ENTRY tag: which topic button they came in via (single value, first-wins)
-  lead: {name, email, phone, company, need, missing:[...]},  # ONE record, backfilled; `need` = evolving intent
+  lead: {name, email, phone, messengers:[...], company, need, missing:[...]},  # ONE record, backfilled; `need` = evolving intent
+                                          # messengers = LIST (WhatsApp/WeChat/Telegram...), ONE per platform,
+                                          # latest wins (different platforms union; same platform overwrites).
+                                          # a usable contact = email OR phone OR any messenger (any ONE is enough)
   turns: [ {role, text, ts}, ... ],      # append per message (bounded)
   slack_thread_ts,                       # root msg ts of this convo's Slack thread
   meta: {page_url, lang}

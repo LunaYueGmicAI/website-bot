@@ -8,8 +8,9 @@
   /* ============================================================
      GMIC 网站咨询 widget —— 单文件自包含(内联 CSS/JS),做成 iframe 独立页。
      iframe 内 origin = 后端域,fetch /chat /event 属同源,不依赖 CORS。
-     定位:多语言"询盘 intake + 导览 + 直接联系我们"。语音=聊天里的听写输入(P3 第二步接)。
-     布局(从上到下):头部(标题+可选邮箱框) / 消息区(问候+快捷按钮列+对话) / 固定联系条 / 输入栏。
+     定位:多语言"询盘 intake + 导览 + 直接联系我们"。语音=聊天里的听写输入,bot 一律文字回复。
+     布局(从上到下):头部(标题) / 消息区(问候+快捷按钮列+对话) / 固定联系条 / 输入栏。
+     联系方式全走对话捕获(bot readback 确认);已删掉早期的"可选邮箱框"(拐杖 + 会被记忆覆盖)。
      ============================================================ */
   :root {
     --accent: #4f46e5;          /* 主色:靛蓝 */
@@ -49,18 +50,8 @@
   header .title { font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 8px; }
   header .dot { width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; }
 
-  /* ---- 邮箱捕获条(Q6:移到输入栏上方、放大醒目)+ Save 按钮 ---- */
-  .email-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; border-top: 1px solid var(--border); background: var(--panel); }
-  .email-bar .ic { font-size: 15px; }
-  .email-bar input { flex: 1; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);
-    font-size: 13.5px; padding: 10px 12px; outline: none; }
-  .email-bar input:focus { border-color: var(--accent); }
-  .email-bar button { flex: 0 0 auto; border: none; background: var(--accent); color: var(--accent-ink);
-    font-size: 13px; font-weight: 600; padding: 10px 16px; border-radius: 10px; cursor: pointer; }
-  .email-bar button:disabled { opacity: .4; cursor: default; }
-  .email-status { font-size: 11px; color: var(--muted); padding: 0 14px; min-height: 0; transition: min-height .1s; }
-  .email-status.show { min-height: 16px; padding: 2px 14px 4px; }
-  .email-status.ok { color: #2ecc71; }
+  /* (原"可选邮箱框"CSS 已删:那个框是给语音兜底的拐杖,又会被对话记忆覆盖,鸡肋。
+     联系方式现在全走对话捕获 + bot readback 确认。) */
 
   /* ---- 消息区 ---- */
   #messages { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; }
@@ -130,13 +121,7 @@
     <div class="row" id="contactRow"></div>
   </div>
 
-  <!-- 邮箱捕获:移到输入栏上方,更醒目 + [Save] 确认按钮(点了立刻走 /lead 存进 lead) -->
-  <div class="email-bar">
-    <span class="ic">✉️</span>
-    <input type="email" id="email" placeholder="Your email — so our team can follow up" autocomplete="email" />
-    <button id="emailSave" disabled>Save</button>
-  </div>
-  <div class="email-status" id="emailStatus"></div>
+  <!-- (原可选邮箱框已删除;联系方式改由对话捕获,bot 会 readback 确认。) -->
 
   <footer>
     <textarea id="text" rows="1" placeholder="Type your message…"></textarea>
@@ -153,8 +138,6 @@
 const API = (window.GMIC_BOT_API || "").replace(/\/$/, "");
 const $ = (id) => document.getElementById(id);
 const messagesEl = $("messages"), textEl = $("text"), sendBtn = $("send"), micBtn = $("mic");
-const emailEl = $("email"), emailStatus = $("emailStatus"), emailSaveBtn = $("emailSave");
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const MAX_REC_MS = 60000;   // 单次录音上限 60s(后端有 8MB 上限,防超大文件 413)
 
 // 会话身份:存 localStorage,刷新/重开页面仍是同一通对话(和后端 session_id 对齐)
@@ -296,6 +279,19 @@ function onContactClick(c) {
   }
 }
 
+// 后端在用户报了某 IM 后回传的"直连渠道"(WhatsApp/微信/Telegram)——甩一个"想直接找我们?点这里"的气泡。
+// 数据结构就是 /config 里 contacts 的那几条,所以渲染逻辑和 onContactClick 一致(二维码 vs 打开按钮)。
+function renderThrowbacks(list) {
+  for (const c of list || []) {
+    if (c.type === "qr") {
+      addBubble("bot", `Prefer ${c.label}? ${c.value || "Scan to add us."}`, { qr: c.qr });
+    } else {
+      addBubble("bot", `Prefer ${c.label}? You can reach us directly here 👇`,
+                { action: { url: c.url, label: c.open_label } });
+    }
+  }
+}
+
 // ---- 打字消息闭环 ----
 async function sendText() {
   const text = textEl.value.trim();
@@ -305,10 +301,9 @@ async function sendText() {
   setBusy(true); const stop = showTyping();
   try {
     const body = { session_id: sessionId, text, page_url: document.referrer || location.href };
-    const email = emailEl.value.trim();
-    if (email) body.email = email;   // 邮箱框填了就带上(后端校验后入 lead)
     const r = await postJSON("/chat", body);
     stop(); addBubble("bot", r.reply || "…");
+    renderThrowbacks(r.contacts);   // 用户报了 WhatsApp/微信/Telegram 时,附上我们的直连入口
   } catch (e) { stop(); addBubble("bot", "Sorry, I'm having trouble right now — please try again in a moment."); }
   setBusy(false);
 }
@@ -376,6 +371,7 @@ async function uploadVoice(blob, mime) {
     stop();
     if (r.transcript) addBubble("user", r.transcript);   // 转写出来就当"用户说的"显示
     addBubble("bot", r.reply || "…");                    // 听不清时 reply=友好提示
+    renderThrowbacks(r.contacts);   // 语音里报了 IM 时,同样甩直连入口(和打字一致)
   } catch (e) {
     stop(); addBubble("bot", "Sorry, I couldn't process that audio — please try again or type.");
   }
@@ -385,36 +381,10 @@ async function uploadVoice(blob, mime) {
 function setBusy(v) { busy = v; sendBtn.disabled = v || !textEl.value.trim(); micBtn.disabled = v && !recording; }
 function autosize() { textEl.style.height = "auto"; textEl.style.height = Math.min(textEl.scrollHeight, 120) + "px"; sendBtn.disabled = busy || !textEl.value.trim(); }
 
-// ---- 邮箱框:输入即调 Save 可用态;点 Save → /lead 立刻入库 ----
-function setEmailStatus(msg, ok) {
-  emailStatus.textContent = msg || "";
-  emailStatus.className = "email-status" + (msg ? " show" : "") + (ok ? " ok" : "");
-}
-function onEmailInput() {
-  // 只有像邮箱才让 Save 可点(轻校验;真正校验在后端)
-  emailSaveBtn.disabled = !EMAIL_RE.test(emailEl.value.trim());
-}
-async function saveEmail() {
-  const v = emailEl.value.trim();
-  if (!v) return;
-  emailSaveBtn.disabled = true;
-  try {
-    const r = await postJSON("/lead", { session_id: sessionId, email: v, page_url: document.referrer || location.href });
-    // 后端回执里 saved.email 有值 = 真存进去了;没有 = 格式没过后端校验
-    if (r.saved && r.saved.email) setEmailStatus("Saved ✓ — we'll follow up here.", true);
-    else setEmailStatus("Hmm, that email looks off — mind checking it?", false);
-  } catch (e) {
-    setEmailStatus("Couldn't save just now — please try again.", false);
-  }
-  onEmailInput();   // 恢复按钮可用态
-}
-
 textEl.addEventListener("input", autosize);
 textEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); } });
 sendBtn.addEventListener("click", sendText);
 micBtn.addEventListener("click", toggleMic);
-emailEl.addEventListener("input", onEmailInput);
-emailSaveBtn.addEventListener("click", saveEmail);
 
 // ---- 启动:拉配置 → 问候语 + 快捷按钮列 + 联系条 ----
 (async function init() {

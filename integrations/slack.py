@@ -46,14 +46,20 @@ def _card_text(session):
     """
     lead = session.get("lead") or {}
     entry_intent = session.get("entry_intent") or "—"
-    contact = lead.get("email") or lead.get("phone")
+    # 联系方式拆成 Email / Phone / Messengers 各一行:给了哪个显示哪个(以前压成一个
+    # "Contact",email 优先 → 用户报了 phone/IM 反而看不到,现在都单独列)。
+    email = lead.get("email")
+    phone = lead.get("phone")
+    messengers = lead.get("messengers") or []
     parts = [
         "*🆕 New GMIC website inquiry*",
         f"• Entry: {entry_intent}",
-        f"• Contact: {'✅ ' + contact if contact else '❌ not left'}",
+        f"• Email: {'✅ ' + email if email else '—'}",
+        f"• Phone: {'✅ ' + phone if phone else '—'}",
+        f"• Messengers: {'✅ ' + ', '.join(messengers) if messengers else '—'}",
         f"• Name: {lead.get('name') or '—'}",
         f"• Need: {lead.get('need') or '—'}",
-        f"• Source: {session.get('meta', {}).get('page_url', '—')}",
+        f"• Source: {session.get('meta', {}).get('page_url') or '—'}",
     ]
     if lead.get("missing"):
         parts.append(f"• Missing: {', '.join(lead['missing'])}")

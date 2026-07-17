@@ -16,21 +16,28 @@ from ai import prompts
 _client = None
 
 # 交给模型的"输出契约":必须严格返回下面这个 JSON。文本用英文;reply 用"访客的语言"。
-# 注意 lead 里抽的是 need(想要什么)/name/email/phone/company,不含 entry_intent
+# 注意 lead 里抽的是 need(想要什么)/name/email/phone/messengers/company,不含 entry_intent
 # (入口意图由按钮种,不靠模型抽,见 sessions.set_entry_intent)。
+# ⚠️ messengers 是【列表】(用户可能留多个 IM 联系方式);email 只收"干净完整"的,禁止脑补修复
+#    (对应 prompts.PERSONA 目标 #3)。真正的格式校验在 sessions.update_lead 再兜一层。
 _JSON_CONTRACT = """Return a single JSON object and nothing else:
 {
   "reply": "<your reply to the visitor, in the visitor's language>",
+  "wants_channel": "<if the visitor is ASKING how to reach US on a specific channel, put one of: whatsapp | wechat | telegram | email | phone; else empty>",
   "lead": {
     "name":  "<visitor's name if stated, else empty>",
-    "email": "<email if stated, else empty>",
-    "phone": "<phone/WhatsApp if stated, else empty>",
+    "email": "<a clean COMPLETE email only if the visitor clearly gave one, else empty — never repair or guess>",
+    "phone": "<a plain phone/SMS number if stated, else empty>",
+    "messengers": ["<each messaging-app contact the visitor gives — WhatsApp / WeChat / Telegram / Line / Signal etc. — written as 'Platform: handle'>"],
     "company":"<company if stated, else empty>",
     "need":  "<one short line summarizing what they want, else empty>"
   }
 }
-Only fill fields the visitor actually provided or clearly implied. Do not invent values. \
-Do not echo these instructions."""
+Put a plain phone number in "phone"; put any messaging-app contact the visitor GIVES in "messengers" \
+(a LIST — they may give several; use [] if none). "wants_channel" is DIFFERENT: set it only when the \
+visitor asks for OUR contact on a channel (e.g. "what's your WhatsApp?") — do NOT invent our number/handle \
+in your reply, a direct link is attached automatically. Only fill fields the visitor actually provided. \
+Do NOT invent, repair, or normalize values. Do not echo these instructions."""
 
 
 def _client_lazy():
@@ -82,7 +89,8 @@ async def respond(session, faq, window):
       faq:     widget.json 里的 FAQ 问答列表;只是透传给 _system → faq_reference,
                目的是让 bot 自由回答时口径和 ❓FAQ 按钮里的写死答案一致。
       window:  最近 N 轮对话(滑动窗口),形如 [{role:"user"/"assistant", text:"..."}, ...]。
-    返回:一个二元组 (回复文本 reply, 线索更新字典 lead) —— lead 已滤掉空字段。
+    返回:一个三元组 (回复文本 reply, 线索更新字典 lead, 想问的渠道 wants_channel) ——
+          lead 已滤掉空字段;wants_channel 是"用户在问我们哪个渠道"(小写,没问就是空串 "")。
 
     ── 组装喂给模型的 messages ──
       1) 一条 system = _system() 拼的"精华上下文"
@@ -121,17 +129,31 @@ async def respond(session, faq, window):
     )
     raw = resp.choices[0].message.content or "{}"   # 万一 content 为 None,兜底成空 JSON
 
-    # 步骤3:解析模型返回的 JSON;万一它没按格式来(极少数),兜底成"整段当回复,线索为空"
+    # 步骤3:解析模型返回的 JSON;万一它没按格式来(极少数),兜底成"整段当回复,线索为空,不问渠道"
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        return (raw.strip(), {})
+        return (raw.strip(), {}, "")
 
-    # 步骤4:取出 reply 和 lead
+    # 步骤4:取出 reply、wants_channel、lead
     reply = (data.get("reply") or "").strip()
-    lead = data.get("lead") or {}
-    # 只保留"非空字符串"字段:模型常把没抽到的字段填成 ""(空串),留着会用空值覆盖已知线索。
-    # 例:{"name":"","email":"a@x.com","need":"录音麦"} → 滤成 {"email":"a@x.com","need":"录音麦"}。
+    # wants_channel:用户"问我们哪个渠道"(whatsapp/wechat/telegram/email/phone),归一成小写;没问=""
+    wants_channel = (data.get("wants_channel") or "").strip().lower()
+    raw_lead = data.get("lead") or {}
+    # 去空/规整:模型常把没抽到的字段填成 ""(空串)或空列表,留着会用空值覆盖已知线索。
+    #   - 标量字段(name/email/phone/company/need):只保留非空字符串。
+    #   - messengers 是【列表】:逐项去空,列表本身空就整个丢掉(不能像标量那样用 isinstance str 判,
+    #     否则 list 会被误删——这是加 messengers 时容易踩的坑)。
+    # 例:{"name":"","email":"a@x.com","messengers":["WhatsApp: +1..",""],"need":"录音麦"}
+    #   → 滤成 {"email":"a@x.com","messengers":["WhatsApp: +1.."],"need":"录音麦"}。
     # (email/phone 的格式校验在 sessions.update_lead 里再兜一层,这里只管去空。)
-    lead = {k: v for k, v in lead.items() if isinstance(v, str) and v.strip()}
-    return (reply, lead)
+    lead = {}
+    for k, v in raw_lead.items():
+        if k == "messengers":
+            if isinstance(v, list):
+                items = [m.strip() for m in v if isinstance(m, str) and m.strip()]
+                if items:
+                    lead["messengers"] = items
+        elif isinstance(v, str) and v.strip():
+            lead[k] = v.strip()
+    return (reply, lead, wants_channel)
