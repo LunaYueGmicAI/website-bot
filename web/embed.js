@@ -37,22 +37,22 @@
 @media (prefers-color-scheme:dark){.wrap{--bg:#14161c;--panel:#1b1e26;--text:#eceef4;--muted:#9aa2b4;--border:#2a2f3b;}} \
 .scrim{position:fixed;inset:0;z-index:2147482999;display:none;background:rgba(15,17,24,.10);pointer-events:none;} \
 .scrim.show{display:block;} \
-.pop{position:fixed;z-index:2147483001;width:320px;max-width:calc(100vw - 16px);background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:16px;box-shadow:0 14px 44px rgba(0,0,0,.24);padding:11px 13px 8px;display:none;} \
+.pop{position:fixed;z-index:2147483001;width:320px;max-width:calc(100vw - 16px);background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:16px;box-shadow:0 14px 44px rgba(0,0,0,.24);padding:11px 13px 15px;display:none;} \
 .pop.show{display:block;animation:gvpop .16s ease-out;} \
 @keyframes gvpop{from{transform:translateY(6px) scale(.97);opacity:.4;}to{transform:none;opacity:1;}} \
 .tail{position:absolute;top:100%;width:14px;height:14px;margin-top:-8px;margin-left:-7px;background:var(--bg);border-right:1px solid var(--border);border-bottom:1px solid var(--border);transform:rotate(45deg);} \
 .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;} \
 .hd .t{font-size:15.5px;font-weight:700;color:var(--text);} \
 .x{border:none;background:none;color:var(--muted);font-size:16px;cursor:pointer;line-height:1;} \
-canvas.wave{display:block;width:76%;height:58px;margin:5px auto 2px;} \
-.status{text-align:center;font-size:11.5px;color:var(--muted);min-height:15px;margin-bottom:8px;} \
+canvas.wave{display:block;width:76%;height:58px;margin:5px auto 0;} \
+.status{text-align:center;font-size:11.5px;color:var(--muted);min-height:14px;margin:0 0 15px;} \
 .status.rec{color:var(--danger);font-weight:600;} \
 .status.bad{color:var(--danger);} \
-.em-lbl{font-size:11.5px;color:var(--muted);margin:4px 0 5px;} \
+.em-lbl{font-size:11.5px;color:var(--muted);margin:0 0 6px;} \
 .em-lbl b{color:var(--danger);} \
-.ct-pills{display:flex;flex-wrap:nowrap;gap:3px;margin-bottom:7px;} \
-.ct-pill{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:center;font-size:9.5px;padding:4px 3px;border-radius:999px;border:1px solid var(--border);background:var(--panel);color:var(--muted);cursor:pointer;user-select:none;line-height:1.25;white-space:nowrap;} \
-.ct-pill .e{font-size:8.5px;margin-right:1px;} \
+.ct-pills{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-bottom:8px;} \
+.ct-pill{flex:0 1 auto;text-align:center;font-size:11.5px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:var(--panel);color:var(--muted);cursor:pointer;user-select:none;line-height:1.25;white-space:nowrap;} \
+.ct-pill .e{font-size:10.5px;margin-right:2px;} \
 .ct-pill.on{background:var(--accent);color:#fff;border-color:var(--accent);} \
 .em-row{display:flex;gap:8px;align-items:stretch;} \
 .contact{flex:1;min-width:0;padding:10px 12px;font-size:14px;border:1px solid var(--border);border-radius:11px;background:var(--panel);color:var(--text);outline:none;} \
@@ -280,9 +280,17 @@ canvas.wave{display:block;width:76%;height:58px;margin:5px auto 2px;} \
       var data = null;
       if (recState === "recording" && analyser) { data = new Uint8Array(analyser.frequencyBinCount); analyser.getByteFrequencyData(data); }
       ctx.fillStyle = "#2563eb";
+      var center = (bars - 1) / 2;
       for (var i = 0; i < bars; i++) {
         var h = minH;
-        if (data) { var v = data[Math.floor(i * data.length / bars)] / 255; h = Math.max(minH, v * (H - 4 * dpr)); }
+        if (data) {
+          // 居中起伏:离中心越近取越低频(人声最响的段)→ 中间跳得最高、向两边对称递减,
+          //   而不是"只有前半段(低频那头)动"。
+          var d = center ? Math.abs(i - center) / center : 0;   // 0=中心, 1=两端
+          var idx = Math.min(data.length - 1, Math.floor(d * data.length * 0.55));
+          var v = data[idx] / 255;
+          h = Math.max(minH, v * (H - 4 * dpr));
+        }
         var x = i * gap + (gap - bw) / 2, r = bw / 2;
         ctx.beginPath();
         if (ctx.roundRect) ctx.roundRect(x, mid - h / 2, bw, h, r); else ctx.rect(x, mid - h / 2, bw, h);
