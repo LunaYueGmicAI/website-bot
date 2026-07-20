@@ -133,7 +133,10 @@ const scrim = $("scrim"), pop = $("pop"), body = $("body"), waveEl = $("wave"), 
       ctPills = $("ctPills");
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const MAX_REC_MS = 120000;
+// ⭐ 录音【不设时间上限】,改按【体积】兜底:后端 /voice/message 硬上限 8MB(MAX_AUDIO_BYTES),
+//    超了发送会 413。所以前端边录边累计字节,快到上限(留 multipart 余量,7.5MB)就自动停并提示,
+//    保证"想录多久录多久 + 发送永不失败"。按语音编码 7.5MB ≈ 十几分钟,对语音留言等于没限制。
+const SIZE_BUDGET = 7_500_000;
 
 // 每种联系方式的输入提示 + 键盘类型(inputmode)+ 校验失败话术。
 // 校验规则对齐后端 sessions._valid_email / _valid_phone(email 查格式、phone 查 7-15 位数字、IM 只要非空)。
@@ -151,12 +154,12 @@ let recState = "idle";       // idle | recording | paused
 let holding = false;
 let recorder = null, stream = null, chunks = [], mime = "audio/webm", audioBlob = null;
 let audioCtx = null, analyser = null, waveOn = false, raf = 0;
-let segStart = 0, elapsedMs = 0;
+let segStart = 0, elapsedMs = 0, recordedBytes = 0;   // elapsedMs 只当秒表显示(不再是上限);recordedBytes 用于体积兜底
 
 // ---------- 开/关气泡 ----------
 function openPop() {
   if (open) return;
-  open = true; audioBlob = null; recState = "idle"; elapsedMs = 0; chunks = [];
+  open = true; audioBlob = null; recState = "idle"; elapsedMs = 0; recordedBytes = 0; chunks = [];
   contactEl.value = ""; emHint.textContent = ""; emHint.className = "em-hint";
   selectType("email");                 // 每次打开都回到默认 Email
   setStatus("Hold the mic below and speak", "");
@@ -212,8 +215,9 @@ contactEl.addEventListener("input", () => {
 
 // ---------- 录音:全在麦克风按钮(长按录/续录,松手暂停)----------
 micBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); if (!open) openPop(); holdStart(); });
-window.addEventListener("pointerup", holdEnd);
-window.addEventListener("pointercancel", holdEnd);
+// 注意:包一层,别把事件对象当成 holdEnd 的 maxedOut 参数(否则正常松手会误报"到上限")。
+window.addEventListener("pointerup", () => holdEnd());
+window.addEventListener("pointercancel", () => holdEnd());
 
 async function ensureStream() {
   if (stream) return true;
@@ -234,30 +238,33 @@ async function holdStart() {
   if (!(await ensureStream())) { holding = false; return; }
   if (!holding) return;                 // 首次授权弹窗期间已松手 → 等下次长按
   if (recState === "idle") {
-    chunks = [];
+    chunks = []; recordedBytes = 0;
     recorder = new MediaRecorder(stream); mime = recorder.mimeType || "audio/webm";
-    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    // 累计字节 + 体积兜底:接近后端 8MB 上限就自动停(不设时间上限,见 SIZE_BUDGET 注释)。
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size) { chunks.push(e.data); recordedBytes += e.data.size; }
+      if (recordedBytes >= SIZE_BUDGET && recState === "recording") { holding = false; holdEnd(true); }
+    };
     recorder.onstop = onStopped;
-    recorder.start();
+    recorder.start(1000);              // ⭐ 带 timeslice:每秒回一块数据 → 录制中就能累计字节、及时兜底
   } else if (recState === "paused") {
     try { recorder.resume(); } catch (e) {}
   }
   recState = "recording"; segStart = Date.now();
   micBtn.classList.add("rec"); hintEl.textContent = "Release to pause";
   tick(); updateSend();
-  clearTimeout(holdStart._max);
-  holdStart._max = setTimeout(() => { if (recState === "recording") { holding = false; holdEnd(); } }, Math.max(0, MAX_REC_MS - elapsedMs));
 }
 
-function holdEnd() {
+// maxedOut=true:是因为录到体积上限被自动停的(给不同的提示)。
+function holdEnd(maxedOut) {
   holding = false;
   if (recState !== "recording") return;
   try { recorder.pause(); } catch (e) {}
   elapsedMs += Date.now() - segStart;
   recState = "paused";
-  clearTimeout(holdStart._max);
   micBtn.classList.remove("rec"); hintEl.textContent = "Hold to add more";
-  if (recorded()) setStatus(`Paused ${fmt(elapsedMs)} · hold to add, or Send`, "");
+  if (maxedOut) setStatus(`Reached max length (${fmt(elapsedMs)}) · tap Send`, "");
+  else if (recorded()) setStatus(`Paused ${fmt(elapsedMs)} · hold to add, or Send`, "");
   else setStatus("Too short — hold the mic and speak.", "bad");
   updateSend();
 }
