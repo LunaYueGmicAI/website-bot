@@ -11,7 +11,10 @@
        - 所有录音控制都在【那一个麦克风按钮】上(对讲机式):长按=录/续录,松手=暂停(不结束),
          再长按=接着录(MediaRecorder.pause()/resume() 拼成一段干净音频),点【发送】才结束+上传。
        - 浮窗是从按钮【弹出】的气泡:在按钮【正上方】,底部有个【向下小尖角】连到按钮。
-       - 气泡里【只有音波 + email + 发送】,没有 hold 键(录音靠下面那个按钮)。
+       - 气泡里【音波 + 联系方式(类型 pill + 值) + 发送】,没有 hold 键(录音靠下面那个按钮)。
+     ⭐ 联系方式(Luna 2026-07-20 定):一排类型 pill(📧Email/📞Phone/WhatsApp/WeChat/Telegram)+ 一个值输入框。
+       统一口径——官网支持多种联络方式,不只限 email。选哪种由 pill 决定(不靠自动识别):光甩个账号
+       无法判断是 WhatsApp/微信/Telegram,让用户明说平台,后端 _validate_contact 才能零歧义归类。
      音波=浮动波条,不套方框,开局静止横线,说话才起伏。主色对齐 gmic.ai 官网蓝 #2563eb。
      ============================================================ */
   :root {
@@ -41,7 +44,7 @@
 
   /* 气泡:在按钮正上方弹出 */
   .pop { position: absolute; left: 50%; bottom: calc(100% + 16px); transform: translateX(-50%);
-    width: 300px; max-width: 92vw; background: var(--bg); border: 1px solid var(--border);
+    width: 340px; max-width: 94vw; background: var(--bg); border: 1px solid var(--border);
     border-radius: 16px; box-shadow: 0 14px 44px rgba(0,0,0,.24); padding: 10px 13px 12px;
     display: none; animation: pop .16s ease-out; }
   .pop.show { display: block; }
@@ -61,14 +64,22 @@
   .status.rec { color: var(--danger); font-weight: 600; }
   .status.bad { color: var(--danger); }
 
-  /* email 标签(小星号红色)在输入框上方 */
+  /* 联系方式标签(小星号红色)在类型 pill 上方 */
   .em-lbl { font-size: 11.5px; color: var(--muted); margin: 4px 0 5px; }
   .em-lbl b { color: var(--danger); }
-  /* email + Send 并排一行(Send 在右) */
+  /* 联系方式类型 pill:五个挤一排(不换行),选中高亮官网蓝;决定发给后端的 contact_type。
+     字号/内边距压小 + emoji 略缩,让五个刚好放进 300px 气泡一排。 */
+  .ct-pills { display: flex; flex-wrap: nowrap; gap: 4px; margin-bottom: 7px; }
+  .ct-pill { flex: 1 1 0; text-align: center; font-size: 10px; padding: 4px 5px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--muted); cursor: pointer; user-select: none; line-height: 1.25;
+    font-family: inherit; white-space: nowrap; }
+  .ct-pill .e { font-size: 9px; margin-right: 1px; }   /* emoji 略小,给文字腾地方 */
+  .ct-pill.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  /* 值输入框 + Send 并排一行(Send 在右) */
   .em-row { display: flex; gap: 8px; align-items: stretch; }
-  #email { flex: 1; min-width: 0; padding: 10px 12px; font-size: 14px; font-family: inherit; border: 1px solid var(--border);
+  #contact { flex: 1; min-width: 0; padding: 10px 12px; font-size: 14px; font-family: inherit; border: 1px solid var(--border);
     border-radius: 11px; background: var(--panel); color: var(--text); outline: none; }
-  #email:focus { border-color: var(--accent); }
+  #contact:focus { border-color: var(--accent); }
   #send { flex: 0 0 auto; padding: 10px 16px; border: none; border-radius: 11px; background: var(--accent);
     color: var(--accent-ink); font-size: 14px; font-weight: 650; cursor: pointer; }
   #send:disabled { opacity: .4; cursor: default; }
@@ -89,9 +100,16 @@
       <div class="hd"><span class="t">🎙️ Voice message</span><button class="x" id="close">✕</button></div>
       <canvas id="wave"></canvas>
       <div class="status" id="status">Hold the mic below and speak</div>
-      <div class="em-lbl">Your email <b>*</b> — so we can reply</div>
+      <div class="em-lbl">How can we reach you? <b>*</b></div>
+      <div class="ct-pills" id="ctPills">
+        <button type="button" class="ct-pill on" data-ct="email"><span class="e">📧</span>Email</button>
+        <button type="button" class="ct-pill" data-ct="phone"><span class="e">📞</span>Phone</button>
+        <button type="button" class="ct-pill" data-ct="whatsapp"><span class="e">💬</span>WhatsApp</button>
+        <button type="button" class="ct-pill" data-ct="wechat"><span class="e">💚</span>WeChat</button>
+        <button type="button" class="ct-pill" data-ct="telegram"><span class="e">✈️</span>Telegram</button>
+      </div>
       <div class="em-row">
-        <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
+        <input id="contact" type="text" inputmode="email" autocomplete="off" placeholder="you@example.com" />
         <button id="send" disabled>Send</button>
       </div>
       <div class="em-hint" id="emHint"></div>
@@ -111,10 +129,22 @@
 const API = (window.GMIC_BOT_API || "").replace(/\/$/, "");
 const $ = (id) => document.getElementById(id);
 const scrim = $("scrim"), pop = $("pop"), body = $("body"), waveEl = $("wave"), statusEl = $("status"),
-      micBtn = $("mic"), hintEl = $("hint"), emailEl = $("email"), emHint = $("emHint"), sendBtn = $("send");
+      micBtn = $("mic"), hintEl = $("hint"), contactEl = $("contact"), emHint = $("emHint"), sendBtn = $("send"),
+      ctPills = $("ctPills");
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const MAX_REC_MS = 120000;
+
+// 每种联系方式的输入提示 + 键盘类型(inputmode)+ 校验失败话术。
+// 校验规则对齐后端 sessions._valid_email / _valid_phone(email 查格式、phone 查 7-15 位数字、IM 只要非空)。
+const CT_META = {
+  email:    { ph: "you@example.com",        mode: "email", bad: "That doesn't look like a valid email." },
+  phone:    { ph: "+1 650 555 0100",        mode: "tel",   bad: "Please enter a valid phone number." },
+  whatsapp: { ph: "WhatsApp number",        mode: "tel",   bad: "Please enter your WhatsApp number." },
+  wechat:   { ph: "WeChat ID",              mode: "text",  bad: "Please enter your WeChat ID." },
+  telegram: { ph: "@username or number",    mode: "text",  bad: "Please enter your Telegram handle." },
+};
+let ctype = "email";              // 当前选中的联系方式类型(默认 email);决定发给后端的 contact_type
 
 let open = false;
 let recState = "idle";       // idle | recording | paused
@@ -127,7 +157,8 @@ let segStart = 0, elapsedMs = 0;
 function openPop() {
   if (open) return;
   open = true; audioBlob = null; recState = "idle"; elapsedMs = 0; chunks = [];
-  emailEl.value = ""; emHint.textContent = ""; emHint.className = "em-hint";
+  contactEl.value = ""; emHint.textContent = ""; emHint.className = "em-hint";
+  selectType("email");                 // 每次打开都回到默认 Email
   setStatus("Hold the mic below and speak", "");
   body.hidden = false; body.style.display = "";
   pop.classList.add("show"); scrim.classList.add("show");
@@ -144,13 +175,38 @@ function closePop() {
 $("close").addEventListener("click", closePop);
 scrim.addEventListener("click", closePop);
 
-// ---------- email 校验 ----------
-function emailValid() { return EMAIL_RE.test(emailEl.value.trim()); }
+// ---------- 联系方式:类型选择 + 校验 ----------
+// 选中某种类型:高亮对应 pill、换输入提示/键盘类型、清空旧提示、重算发送键。
+function selectType(t) {
+  ctype = t;
+  const meta = CT_META[t] || CT_META.email;
+  [...ctPills.children].forEach((b) => b.classList.toggle("on", b.dataset.ct === t));
+  contactEl.placeholder = meta.ph;
+  contactEl.setAttribute("inputmode", meta.mode);
+  emHint.textContent = ""; emHint.className = "em-hint";
+  updateSend();
+}
+ctPills.addEventListener("click", (e) => {
+  const btn = e.target.closest(".ct-pill");
+  if (btn) selectType(btn.dataset.ct);
+});
+
+// 校验当前输入是否合格(按选中类型分流)。规则对齐后端 _validate_contact,避免前端放行、后端 400。
+function contactValid() {
+  const v = contactEl.value.trim();
+  if (!v) return false;
+  if (ctype === "email") return EMAIL_RE.test(v);
+  if (ctype === "phone" || ctype === "whatsapp") {
+    const digits = (v.match(/\d/g) || []).length;   // whatsapp 也是号码:数 7-15 位
+    return digits >= 7 && digits <= 15;
+  }
+  return v.length >= 2;                               // wechat/telegram = 账号/handle,非空即可
+}
 function recorded() { return elapsedMs >= 500; }
-function updateSend() { sendBtn.disabled = !(emailValid() && recorded() && recState !== "recording"); }
-emailEl.addEventListener("input", () => {
-  if (!emailEl.value.trim() || emailValid()) { emHint.textContent = ""; emHint.className = "em-hint"; }
-  else { emHint.textContent = "That doesn't look like a valid email."; emHint.className = "em-hint bad"; }
+function updateSend() { sendBtn.disabled = !(contactValid() && recorded() && recState !== "recording"); }
+contactEl.addEventListener("input", () => {
+  if (!contactEl.value.trim() || contactValid()) { emHint.textContent = ""; emHint.className = "em-hint"; }
+  else { emHint.textContent = (CT_META[ctype] || CT_META.email).bad; emHint.className = "em-hint bad"; }
   updateSend();
 });
 
@@ -248,7 +304,7 @@ let pendingSend = false;
 function onStopped() { audioBlob = new Blob(chunks, { type: mime }); if (pendingSend) { pendingSend = false; doUpload(); } }
 sendBtn.addEventListener("click", () => {
   if (sendBtn.disabled) return;
-  if (!emailValid()) { emHint.textContent = "Please enter a valid email."; emHint.className = "em-hint bad"; return; }
+  if (!contactValid()) { emHint.textContent = (CT_META[ctype] || CT_META.email).bad; emHint.className = "em-hint bad"; return; }
   if (!recorded()) { setStatus("Record a message first.", "bad"); return; }
   sendBtn.disabled = true; sendBtn.textContent = "Sending…";
   pendingSend = true;
@@ -260,13 +316,13 @@ async function doUpload() {
     const sid = "voice_" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "_" + Math.floor(Math.random() * 1e6));
     const fd = new FormData();
     fd.append("session_id", sid);
-    fd.append("contact_type", "email");
-    fd.append("contact_value", emailEl.value.trim());
+    fd.append("contact_type", ctype);                    // 由选中的 pill 决定
+    fd.append("contact_value", contactEl.value.trim());
     fd.append("audio", audioBlob, "voice." + extFor(mime));
     fd.append("page_url", document.referrer || location.href);
     const res = await fetch(API + "/voice/message", { method: "POST", body: fd });
     if (!res.ok) throw new Error("/voice/message -> " + res.status);
-    showDone(emailEl.value.trim());
+    showDone(contactEl.value.trim());
   } catch (e) {
     sendBtn.disabled = false; sendBtn.textContent = "Send";
     setStatus("Couldn't send — please try again.", "bad");

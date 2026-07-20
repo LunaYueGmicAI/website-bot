@@ -23,18 +23,22 @@ from fastapi.staticfiles import StaticFiles
 
 from core import sessions
 from api.routes import router
+from integrations import slack
 
 
 @asynccontextmanager
 async def lifespan(app):
     """
     应用的启动/关闭钩子。
-    启动:拉起后台 TTL 清理协程(每 5 分钟扫一次过期会话)。
-      例:某会话 40 分钟没人说话 > TTL 30 分钟 → 下次扫到就从内存删掉(Slack 归档不动)。
-    关闭:取消这个协程。
+    启动:① 拉起后台 TTL 清理协程(每 5 分钟扫一次过期会话)。
+            例:某会话 40 分钟没人说话 > TTL 30 分钟 → 下次扫到就从内存删掉(Slack 归档不动)。
+          ② 起 Slack 发送队列的后台 worker(串行发 + 限速 + 429 重试,防突发丢线索,见 integrations/slack.py)。
+    关闭:排空 Slack 队列 + 取消两个后台协程。
     """
     task = asyncio.create_task(sessions.run_sweeper(interval=300))
+    await slack.start_worker()
     yield
+    await slack.stop_worker()
     task.cancel()
 
 

@@ -34,7 +34,7 @@ _JSON_CONTRACT = """Return a single JSON object and nothing else:
     "phone": "<a plain phone/SMS number if stated, else empty>",
     "messengers": ["<each messaging-app contact the visitor gives — WhatsApp / WeChat / Telegram / Line / Signal etc. — written as 'Platform: value' where value is a handle OR a number>"],
     "company":"<company if stated, else empty>",
-    "need":  "<one short line summarizing what they want, else empty>"
+    "need":  "<one short line summarizing what they want, written in the visitor's OWN language (Chinese if they wrote Chinese, English if English), else empty>"
   }
 }
 Routing a contact to "phone" vs "messengers": put a number in "phone" ONLY when it is a plain \

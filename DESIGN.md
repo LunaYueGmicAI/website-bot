@@ -118,7 +118,7 @@ the whole "voice captured the wrong email" problem class.
   1) _validate_contact(type, value)  # SERVER-side gate; invalid/empty → 400 (never trust client only)
   2) transcript = edited text, else stt.transcribe(bytes) [OpenAI Whisper]
   3) get_or_create + set_entry_intent("voice-message") + update_lead(contact + need=transcript)
-  4) slack.ensure_card + update_card + post_detail(🎤 transcript + original audio) [Slack]
+  4) slack.ensure_card + post_detail(🎤 original audio) [Slack]  # lead already filled → no update_card
   5) return {ok, transcript}   # no LLM — it's a message drop, not a conversation
 ```
 The audio blob is a per-request local variable — released when the function returns, never
@@ -128,6 +128,15 @@ canned reply without touching the LLM.
 **Slack cards are tagged by source:** voice messages render `*🎙️ New VOICE message*`, chat
 inquiries render `*💬 New CHAT inquiry*` (branch on `entry_intent == "voice-message"`), so the
 team can tell at a glance which leads came in by voice vs typed chat.
+
+**Slack delivery = in-process queue + single worker (`integrations/slack.py`).** Slack limits a
+channel to ~1 message/sec. `ensure_card` / `update_card` / `post_detail` no longer call the API
+inline — they build a job and enqueue it, then return immediately (so `/chat` and `/voice/message`
+never block on Slack). One background worker (started/stopped in the app lifespan) drains the FIFO
+queue, spacing sends by `SLACK_MIN_INTERVAL` (1.1s) and retrying on HTTP 429 up to
+`SLACK_MAX_RETRIES` (5), honoring `Retry-After`. This stops bursty traffic (e.g. an ad spike) from
+silently dropping leads — the old code swallowed 429s. FIFO + single worker also guarantees a
+session's card is created before its thread replies go out.
 
 ## How one bot serves many users
 One async process, one dict keyed by `session_id`. Each user's messages route to their own
