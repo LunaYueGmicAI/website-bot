@@ -32,34 +32,34 @@
 
   var CSS = "\
 :host{all:initial;} \
-*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;} \
+*{box-sizing:border-box;font-family:'Inter','Helvetica Neue',Arial,Helvetica,sans-serif;} \
 .wrap{--accent:#2563eb;--accent-ink:#fff;--bg:#fff;--panel:#f5f6f9;--text:#1f2430;--muted:#7a8194;--border:#e3e6ef;--danger:#e5484d;} \
 @media (prefers-color-scheme:dark){.wrap{--bg:#14161c;--panel:#1b1e26;--text:#eceef4;--muted:#9aa2b4;--border:#2a2f3b;}} \
-.scrim{position:fixed;inset:0;z-index:2147483000;display:none;background:rgba(15,17,24,.14);} \
+.scrim{position:fixed;inset:0;z-index:2147482999;display:none;background:rgba(15,17,24,.10);pointer-events:none;} \
 .scrim.show{display:block;} \
-.pop{position:fixed;z-index:2147483001;width:296px;max-width:calc(100vw - 16px);background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:16px;box-shadow:0 14px 44px rgba(0,0,0,.24);padding:10px 13px 12px;display:none;} \
+.pop{position:fixed;z-index:2147483001;width:320px;max-width:calc(100vw - 16px);background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:16px;box-shadow:0 14px 44px rgba(0,0,0,.24);padding:11px 13px 8px;display:none;} \
 .pop.show{display:block;animation:gvpop .16s ease-out;} \
 @keyframes gvpop{from{transform:translateY(6px) scale(.97);opacity:.4;}to{transform:none;opacity:1;}} \
 .tail{position:absolute;top:100%;width:14px;height:14px;margin-top:-8px;margin-left:-7px;background:var(--bg);border-right:1px solid var(--border);border-bottom:1px solid var(--border);transform:rotate(45deg);} \
 .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;} \
-.hd .t{font-size:13px;font-weight:650;color:var(--text);} \
+.hd .t{font-size:15.5px;font-weight:700;color:var(--text);} \
 .x{border:none;background:none;color:var(--muted);font-size:16px;cursor:pointer;line-height:1;} \
-canvas.wave{display:block;width:70%;height:40px;margin:2px auto 1px;} \
+canvas.wave{display:block;width:76%;height:58px;margin:5px auto 2px;} \
 .status{text-align:center;font-size:11.5px;color:var(--muted);min-height:15px;margin-bottom:8px;} \
 .status.rec{color:var(--danger);font-weight:600;} \
 .status.bad{color:var(--danger);} \
 .em-lbl{font-size:11.5px;color:var(--muted);margin:4px 0 5px;} \
 .em-lbl b{color:var(--danger);} \
-.ct-pills{display:flex;flex-wrap:nowrap;gap:4px;margin-bottom:7px;} \
-.ct-pill{flex:1 1 0;text-align:center;font-size:10px;padding:4px 5px;border-radius:999px;border:1px solid var(--border);background:var(--panel);color:var(--muted);cursor:pointer;user-select:none;line-height:1.25;white-space:nowrap;} \
-.ct-pill .e{font-size:9px;margin-right:1px;} \
+.ct-pills{display:flex;flex-wrap:nowrap;gap:3px;margin-bottom:7px;} \
+.ct-pill{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:center;font-size:9.5px;padding:4px 3px;border-radius:999px;border:1px solid var(--border);background:var(--panel);color:var(--muted);cursor:pointer;user-select:none;line-height:1.25;white-space:nowrap;} \
+.ct-pill .e{font-size:8.5px;margin-right:1px;} \
 .ct-pill.on{background:var(--accent);color:#fff;border-color:var(--accent);} \
 .em-row{display:flex;gap:8px;align-items:stretch;} \
 .contact{flex:1;min-width:0;padding:10px 12px;font-size:14px;border:1px solid var(--border);border-radius:11px;background:var(--panel);color:var(--text);outline:none;} \
 .contact:focus{border-color:var(--accent);} \
 .send{flex:0 0 auto;padding:10px 16px;border:none;border-radius:11px;background:var(--accent);color:var(--accent-ink);font-size:14px;font-weight:650;cursor:pointer;} \
 .send:disabled{opacity:.4;cursor:default;} \
-.em-hint{font-size:11.5px;min-height:14px;margin-top:4px;color:var(--muted);} \
+.em-hint{font-size:11.5px;min-height:0;margin-top:3px;color:var(--muted);} \
 .em-hint.bad{color:var(--danger);} \
 .done{text-align:center;padding:16px 6px;} \
 .done .big{font-size:30px;} .done .m2{margin-top:7px;font-size:13px;color:var(--text);}";
@@ -69,7 +69,7 @@ canvas.wave{display:block;width:70%;height:40px;margin:2px auto 1px;} \
   <div class="scrim" id="scrim"></div> \
   <div class="pop" id="pop"> \
     <div id="body"> \
-      <div class="hd"><span class="t">🎙️ Voice message</span><button class="x" id="close" aria-label="Close">✕</button></div> \
+      <div class="hd"><span class="t">🎙️ Leave us a voice message</span><button class="x" id="close" aria-label="Close">✕</button></div> \
       <div id="formArea"> \
         <canvas class="wave" id="wave"></canvas> \
         <div class="status" id="status">Hold the mic and speak</div> \
@@ -97,10 +97,13 @@ canvas.wave{display:block;width:70%;height:40px;margin:2px auto 1px;} \
     var trigger = document.getElementById(TRIGGER_ID);
     if (!trigger) return;                         // 这页没有 fab 话筒按钮 → 不装
 
-    // 宿主页轻量样式:话筒按钮长按不触发滚动/选中 + 录音时变红。
+    // 宿主页轻量样式:话筒按钮长按不触发滚动/选中 + 高亮反馈。
+    //   .gmic-voice-active = 气泡打开中(含暂停)→ 蓝色高亮,让用户知道这个按钮正在被使用;
+    //   .gmic-voice-rec    = 正在录音 → 红色背景(声明在 active 之后 → 录音时压过高亮)。
     var lite = document.createElement("style");
-    lite.textContent = "#" + TRIGGER_ID + "{touch-action:none;-webkit-user-select:none;user-select:none;}"
-      + "#" + TRIGGER_ID + ".gmic-voice-rec{color:#e5484d !important;}";
+    lite.textContent = "#" + TRIGGER_ID + "{touch-action:none;-webkit-user-select:none;user-select:none;transition:background .15s,color .15s;}"
+      + "#" + TRIGGER_ID + ".gmic-voice-active{background:rgba(37,99,235,.16)!important;color:#2563eb!important;}"
+      + "#" + TRIGGER_ID + ".gmic-voice-rec{background:#e5484d!important;color:#fff!important;}";
     document.head.appendChild(lite);
 
     var host = document.createElement("div");
@@ -125,7 +128,7 @@ canvas.wave{display:block;width:70%;height:40px;margin:2px auto 1px;} \
     function positionPop() {
       var r = trigger.getBoundingClientRect();
       var vw = window.innerWidth;
-      var popW = Math.min(296, vw - 16);
+      var popW = Math.min(320, vw - 16);
       pop.style.width = popW + "px";
       var centerX = r.left + r.width / 2;
       var left = Math.max(8, Math.min(centerX - popW / 2, vw - popW - 8));
@@ -147,6 +150,7 @@ canvas.wave{display:block;width:70%;height:40px;margin:2px auto 1px;} \
       setStatus("Hold the mic and speak", "");
       positionPop();
       pop.classList.add("show"); scrim.classList.add("show");
+      trigger.classList.add("gmic-voice-active");     // 蓝色高亮:按钮正在被使用
       startWaveLoop(); updateSend();
     }
     function closePop() {
@@ -155,10 +159,16 @@ canvas.wave{display:block;width:70%;height:40px;margin:2px auto 1px;} \
       teardownStream(); stopWaveLoop();
       recState = "idle"; open = false;
       pop.classList.remove("show"); scrim.classList.remove("show");
-      trigger.classList.remove("gmic-voice-rec");
+      trigger.classList.remove("gmic-voice-rec", "gmic-voice-active");
     }
     $("close").addEventListener("click", closePop);
-    scrim.addEventListener("click", closePop);
+    // 点气泡外关闭:scrim 现在 pointer-events:none(不再挡住 fab 按钮,修 Mac/Win 二次长按点不动),
+    //   改用文档级捕获监听——点到气泡内或话筒按钮本身都不关(shadow 内的点击 target 会重定向成 host)。
+    document.addEventListener("pointerdown", function (e) {
+      if (!open) return;
+      if (host.contains(e.target) || trigger.contains(e.target)) return;
+      closePop();
+    }, true);
 
     // ---------- 联系方式:类型选择 + 校验 ----------
     function selectType(t) {
