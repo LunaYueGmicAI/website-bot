@@ -68,6 +68,20 @@ app.mount("/widget", StaticFiles(directory=_WEB_DIR, html=True), name="widget")
 app.mount("/voice-widget", StaticFiles(directory=os.path.join(_WEB_DIR, "voice-widget"), html=True), name="voice-widget")
 
 
+# ⭐ 可嵌入的语音留言组件(embed.js):gmic.ai 官网用 <script src=".../embed.js"> 引入,
+#   录音气泡直接跑在官网页面里、锚定到 fab 工具栏的 #fabVoice 话筒按钮(见 web/embed.js)。
+#   跨域 POST 回 /voice/message 由 CORS(ALLOWED_ORIGINS)放行。no-cache 便于迭代后尽快生效。
+from fastapi.responses import FileResponse
+
+@app.get("/embed.js")
+async def embed_js():
+    return FileResponse(
+        os.path.join(_WEB_DIR, "embed.js"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 if __name__ == "__main__":
     # 方便本地直接 `python app.py` 起服务;生产建议直接用 uvicorn 命令(见文件顶部)。
     import uvicorn
