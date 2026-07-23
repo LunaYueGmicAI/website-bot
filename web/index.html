@@ -36,7 +36,7 @@
   header .title { font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 8px; }
   header .dot { width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; }
 
-  #messages { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; }
+  #messages { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; }
   .msg { max-width: 84%; padding: 9px 12px; border-radius: var(--radius); font-size: 14px; line-height: 1.45;
     white-space: pre-wrap; word-wrap: break-word; }
   .msg.bot  { align-self: flex-start; background: var(--bubble-bot); color: var(--text); border-bottom-left-radius: 5px; }
@@ -160,9 +160,13 @@ function addBubble(role, text, opts = {}) {
   el.className = "msg " + role; el.textContent = text;
   if (opts.link) { const a = document.createElement("a"); a.className = "learn-more"; a.href = opts.link; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Learn more →"; el.appendChild(document.createElement("br")); el.appendChild(a); }
   if (opts.action && opts.action.url) { const a = document.createElement("a"); a.className = "learn-more"; a.href = opts.action.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = opts.action.label || "Open →"; el.appendChild(document.createElement("br")); el.appendChild(a); }
-  // opts.pills:一组"了解更多"链接药丸,直接挂在【本条气泡】里(不再单开一条 "Here's more on that" 气泡),
-  // 让方案文字 + 相关链接看起来是同一句话,避免 bot 连吐好几个框显得自言自语。
-  if (Array.isArray(opts.pills)) { for (const p of opts.pills) { if (!p || !p.url) continue; const a = document.createElement("a"); a.className = "learn-more"; a.href = p.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = (p.label || "Open") + " →"; el.appendChild(document.createElement("br")); el.appendChild(a); } }
+  // opts.pills:一组"了解更多"链接药丸,直接挂在【本条气泡】里(紧跟第一句话,不单开一条 "Here's more" 气泡),
+  // 让方案文字 + 相关链接看起来是同一句话。先来一行 👇 指向下面的链接,每个链接前加 👉。
+  if (Array.isArray(opts.pills) && opts.pills.some(p => p && p.url)) {
+    el.appendChild(document.createElement("br"));
+    el.appendChild(document.createTextNode("👇"));
+    for (const p of opts.pills) { if (!p || !p.url) continue; const a = document.createElement("a"); a.className = "learn-more"; a.href = p.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = "👉 " + (p.label || "Open") + " →"; el.appendChild(document.createElement("br")); el.appendChild(a); }
+  }
   if (opts.qr) { const img = document.createElement("img"); img.className = "qr-img"; img.src = opts.qr; img.alt = "WeChat QR"; el.appendChild(img); }
   messagesEl.appendChild(el); scrollDown();
   return el;
@@ -196,8 +200,12 @@ function splitReply(text) {
 // 逐条吐出短气泡(条间留一点停顿,像真人打字);opts(如 link)只挂到最后一条。
 async function addBotReply(text, opts = {}) {
   const parts = splitReply(text);
+  const pills = opts.pills;                       // 链接药丸:挂到【第一条】气泡(紧跟第一句话)
+  const tail = { ...opts }; delete tail.pills;    // 其余(link/action/qr)仍挂【最后一条】
   for (let i = 0; i < parts.length; i++) {
-    addBubble("bot", parts[i], i === parts.length - 1 ? opts : {});
+    const o = (i === parts.length - 1) ? { ...tail } : {};
+    if (i === 0 && pills) o.pills = pills;
+    addBubble("bot", parts[i], o);
     if (i < parts.length - 1) await sleep(350);
   }
 }
@@ -418,7 +426,12 @@ sendBtn.addEventListener("click", sendText);
 (async function init() {
   try { CONFIG = await (await fetch(API + "/config")).json(); }
   catch (e) { CONFIG = { greeting: "Hi 👋 How can we help?", quickActions: [], faq: [], contacts: [] }; }
-  addBubble("bot", CONFIG.greeting || "Hi 👋 How can we help?");
+  // 欢迎语:支持 \n 换行(把结尾的 "Where would you like to start? 👇" 单独放一行)
+  (function () {
+    const g = CONFIG.greeting || "Hi 👋 How can we help?";
+    const el = addBubble("bot", "");
+    g.split("\n").forEach((ln, i) => { if (i) el.appendChild(document.createElement("br")); el.appendChild(document.createTextNode(ln)); });
+  })();
   renderQuickColumn(); renderContacts();
 })();
 </script>
