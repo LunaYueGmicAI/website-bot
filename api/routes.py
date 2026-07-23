@@ -18,7 +18,8 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 
 from core import sessions
-from core.widget_config import CONFIG, ACTIONS, match_our_channels, contact_for_channel
+from core.widget_config import (CONFIG, ACTIONS, QUESTIONNAIRES, recommend_for,
+                                match_our_channels, contact_for_channel)
 from ai import stt, llm
 from integrations import slack
 
@@ -215,7 +216,7 @@ async def event(req: EventReq):
         if not act:   # id 查不到按钮(前端传错 / 配置漏)→ 400,别静默返回空 reply + 白建空卡
             raise HTTPException(status_code=400, detail="unknown action id")
 
-        # 种"入口意图":记下用户从哪个话题按钮进来(如 "odm"),首次锁定不覆盖。
+        # 累积"入口意图":记下用户点过的话题按钮(如 "odm"),按到达顺序追加、去重(第一个为主归因)。
         STORE.set_entry_intent(req.session_id, act.get("entry_intent"))
 
         # opener = 开场白:点这个话题按钮后 bot 先说的那句【写死】的话(不调大模型,直接秒回)。
@@ -281,6 +282,160 @@ async def chat(req: ChatReq):
 
 # 注:原 POST /lead 端点已删除。它只服务于 widget 的"邮箱框 Save"按钮,那个框已连同一起去掉
 #     (鸡肋 + 和对话记忆打架会被覆盖)。聊天里联系方式走对话捕获(/chat);语音留言走 /voice/message 必填框。
+
+
+# ============================================================================
+# 问卷(Guided questionnaire)
+#   产品背景:官网 chatbot 顶部 4 个 Tab(ODM / Add your branding / Help me choose / Book a demo),
+#   每个 Tab 点开 = 一句介绍 + 3 道选择题。问卷屏在【前端】渲染、翻页、收集答案,【全程不调 LLM】
+#   (确定性、省钱、防幻觉)。用户答完最后一题,前端把整包答案 POST 到这里。
+#
+#   本端点做四件事(见下面各 step):
+#     ① 把答案 + 入口 Tab 写进会话(结构化上下文,后续每轮注入 LLM → bot 绝不重复问答过的题);
+#     ② (仅 Tab3 help-me-choose)按答案查 recommend_rules,算出推荐产品/链接/hint;
+#     ③ 调一次 LLM,依答案 + 推荐生成一段【量身方案】回给用户(复用 /chat 那套出回复+归档逻辑);
+#     ④ 把该 Tab 要甩的链接(方案链接 / Tab3 推荐链接 / Book-a-demo 日历)一并返回给前端展示。
+#   产出:{reply: 方案文本, contacts: 要甩的直连渠道, links: 要展示的链接列表}。
+# ============================================================================
+class QuestionnaireReq(BaseModel):
+    # 例:{"session_id":"sess_ab12","tab":"help-me-choose",
+    #      "answers":{"usage":"To answer phone calls","where":"Office / meetings","musthave":["Security / encryption"]}}
+    session_id: str
+    tab: str                       # 哪个 Tab:odm / add-branding / help-me-choose / book-demo
+    answers: dict = {}             # {题目id: 选中的选项(字符串) 或 多选列表};跳过的题不在里面
+    page_url: str | None = None
+    lang: str | None = None
+
+
+def _sanitize_answers(q, answers):
+    """
+    只保留【问卷定义里真实存在的题】+【该题选项清单里真实存在的选项】,其余一律丢弃。
+
+    为什么必须做(不是可选):问卷答案会被拼进 LLM 的【系统提示】(见 prompts.questionnaire_line),
+    这是比 /chat 用户消息更高的信任位;而本端点是公开的(任何人可直接 POST,不只经我们那个"只会
+    发合法选项"的确定性前端)。不校验 = 把"任意字符串注入系统提示"的口子敞开(prompt injection),
+    也兜不住前端 bug 传来的脏值。校验后:未知题 id 被丢、非法选项被丢、多选里混进的非法项被逐个过滤。
+
+    输入:q = 该 Tab 的问卷定义(取 questions 的 id + options 清单);answers = 前端提交的原始 dict。
+    输出:清洗后的 answers(只含合法题 + 合法选项);某题非法/被清空 → 该题不出现在结果里。
+    例:题 usage 选项含 "On a desk / in a room";answers={"usage":"On a desk / in a room","x":"注入串"}
+        → {"usage":"On a desk / in a room"}(未知题 x 丢掉)。
+        多选 musthave:["Rugged / waterproof","恶意串"] → 只留 ["Rugged / waterproof"]。
+    """
+    by_id = {question["id"]: question for question in q.get("questions", [])}
+    valid = {}
+    for qid, val in (answers or {}).items():
+        question = by_id.get(qid)
+        if not question:
+            continue                                        # 未知题 id → 丢
+        opts = question.get("options", [])
+        if isinstance(val, list):                           # 多选题:逐项过滤,只留清单内的
+            kept = [v for v in val if v in opts]
+            if kept:
+                valid[qid] = kept
+        elif val in opts:                                   # 单选题:必须在选项清单内
+            valid[qid] = val
+    return valid
+
+
+def _summarize_answers(q, answers):
+    """
+    把问卷答案渲染成一行【人类可读】的摘要(题目全文 → 选中的答案),用途有二:
+      ① 作为一条 user turn 追加进对话(给 LLM 一个"用户刚提交了这些"的触发点,好生成方案);
+      ② 发进 Slack thread 做明细归档,团队一眼看全用户选了什么。
+    输入:q = 该 Tab 的问卷定义(取 questions 的题目全文);answers = 用户答案。
+    产出:形如 "How will it be used? → To answer phone calls · Where...? → Office / meetings" 的字符串;
+          一题都没答 → "(completed the questionnaire)"。
+    """
+    parts = []
+    for question in q.get("questions", []):     # 按问卷定义的题序走(而非 answers 的字典序),读起来顺
+        val = answers.get(question["id"])
+        if not val:                             # 这题被 skip 了 → 不进摘要
+            continue
+        if isinstance(val, list):               # 多选题 → 逗号拼接
+            val = ", ".join(val)
+        parts.append(f"{question['q']} → {val}")
+    return " · ".join(parts) if parts else "(completed the questionnaire)"
+
+
+def _questionnaire_links(tab, q, recommendation):
+    """
+    算出这个 Tab 答完后要给用户展示的链接列表(前端渲染成按钮)。
+    分三种:
+      - book-demo        → 日历预约链接(questionnaire 定义里的 result_link);
+      - help-me-choose   → Tab3 推荐产品的详情/总览链接(recommend_for 的产出);
+      - odm / add-branding → 该 Tab 配好的相关服务页链接(questionnaire.links)。
+    产出:[{"label":..,"url":..}, ...],没有就 []。
+    """
+    if tab == "book-demo":
+        rl = q.get("result_link")
+        return [rl] if rl else []
+    if tab == "help-me-choose":
+        # 用推荐的型号名当链接标签(比泛泛的 "View details" 明确得多):
+        #   有型号 → "See HA-SPK01"(前端会自动补 " →");没型号(兜底)→ "Browse our products"。
+        rec = recommendation or {}
+        link = rec.get("link")
+        if not link:
+            return []
+        prods = rec.get("products") or []
+        label = "See " + ", ".join(prods) if prods else "Browse our products"
+        return [{"label": label, "url": link}]
+    return q.get("links", [])   # odm / add-branding:直接用问卷里配好的链接(标签本就有描述性)
+
+
+@router.post("/questionnaire")
+async def questionnaire(req: QuestionnaireReq):
+    """
+    用户答完某个 Tab 的问卷后的提交入口(和 /event 按钮、/chat 打字并列)。会调一次大模型出方案。
+    每一步干啥 / 产出什么见下面的 step 注释。
+    """
+    # 0) 校验 Tab 合法:tab 必须是 widget.json 里定义过的 4 个之一,否则 400(别拿未知 tab 建脏会话)。
+    #    产出:q = 该 Tab 的问卷定义(intro/题目/链接),后面用它渲染摘要、取链接。
+    q = QUESTIONNAIRES.get(req.tab)
+    if not q:
+        raise HTTPException(status_code=400, detail="unknown questionnaire tab")
+
+    # 1) 清洗答案:只留问卷定义里真实存在的题 + 合法选项(防 prompt injection / 前端脏值,见 _sanitize_answers)。
+    #    之后所有步骤(查推荐 / 存会话 / 摘要)都用这份【干净的】answers,不再碰 req.answers 原始值。
+    answers = _sanitize_answers(q, req.answers)
+
+    # 2) 确保会话存在(首次就在这建),并记来源页 page_url、语言 lang 进 meta。
+    STORE.get_or_create(req.session_id, {"page_url": req.page_url, "lang": req.lang})
+
+    # 3) 累积"入口意图" = 这个 Tab(按到达顺序追加、去重;连做多份问卷会记下走过的每个 Tab,
+    #    第一个仍是主归因)。Slack 卡的"入口"行、LLM 的开场上下文都看它。
+    STORE.set_entry_intent(req.session_id, req.tab)
+
+    # 4) (仅 Tab3 help-me-choose)按【清洗后的】答案查推荐规则,算出推荐产品/链接/hint;其它 Tab 无推荐(None)。
+    #    产出:recommendation dict 或 None。它会存进会话对应 Tab 的桶,供 LLM 出方案 + 前端取链接。
+    recommendation = recommend_for(answers) if req.tab == "help-me-choose" else None
+
+    # 5) 把答案 + 推荐写进会话【对应 Tab 的桶】(同 Tab 覆盖、换 Tab 新增,多份问卷并存)。之后每轮由
+    #    llm._system → prompts.questionnaire_line 把所有做过的 Tab 一起注入系统提示,所以 GPT 后续全程
+    #    看得到这些选择 → 顺着出方案、且绝不重复问答过的题。
+    STORE.set_questionnaire(req.session_id, req.tab, answers, recommendation)
+
+    # 6) 把答案渲染成人类可读摘要,并作为一条 user turn 追加进对话:
+    #    ── 为什么当 user turn:LLM 的 respond() 是"看着对话窗口回话",需要一个触发点。这条摘要
+    #       就是那个触发(相当于用户说"我选了这些,给我方案")。它只进服务器内存(前端不靠它渲染,
+    #       前端自己有选择的显示副本),几轮后随滑动窗口自然滚掉,而结构化答案已在 step5 长期留在会话里。
+    summary = _summarize_answers(q, answers)
+    STORE.append_turn(req.session_id, "user", summary)
+
+    # 7) Slack:确保有线索卡 + 把问卷摘要发进 thread 归档(📋 前缀标明是问卷提交)。
+    await slack.ensure_card(STORE, req.session_id)
+    await slack.post_detail(STORE, req.session_id, f"📋 {summary}")
+
+    # 8) 跑大模型出【方案】+ 归档 AI 回复到 thread + 刷新线索卡 + 算这轮要甩的直连渠道。
+    #    直接复用 /chat 那套 _reply_and_archive(前置条件"用户输入已 append"在 step6 已满足)。
+    #    产出:reply = 量身方案文本;throwbacks = 要甩回的直连渠道(通常问卷这步为空)。
+    reply, throwbacks = await _reply_and_archive(req.session_id)
+
+    # 9) 算出这个 Tab 要展示给用户的链接(方案链接 / Tab3 推荐链接 / Book-a-demo 日历)。
+    links = _questionnaire_links(req.tab, q, recommendation)
+
+    # 产出:{reply: 方案, contacts: 甩链, links: 展示链接} → 前端显示 bot 方案气泡 + 链接按钮。
+    return {"reply": reply, "contacts": throwbacks, "links": links}
 
 
 # ============================================================================

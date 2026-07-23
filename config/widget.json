@@ -1,31 +1,278 @@
 {
-  "greeting": "Hi 👋 How can we help?",
+  "greeting": "We design and build custom AI voice hardware — end to end. As the AI hardware arm of Gainstrong (a manufacturer since 2009), we take you from concept to mass production: wearable recorders, smart badges, speakers, headsets, call-answering devices and more. What brings you here? 👇",
   "quickActions": [
     {
       "id": "odm",
-      "label": "🏭 Custom / ODM",
-      "type": "topic",
-      "entry_intent": "odm",
-      "opener": "We do full ODM/OEM custom hardware — enclosure, firmware, and mass production. Could you tell me roughly what product you have in mind, expected quantity, and your target launch date?"
+      "icon": "🏭",
+      "label": "ODM / Build a custom device",
+      "type": "questionnaire",
+      "entry_intent": "odm"
     },
     {
-      "id": "products",
-      "label": "📦 Products",
-      "type": "link",
-      "url": "https://gmic.ai/products/"
+      "id": "add-branding",
+      "icon": "🏷️",
+      "label": "Add your branding",
+      "type": "questionnaire",
+      "entry_intent": "add-branding"
     },
     {
-      "id": "demo",
-      "label": "📅 Book a demo",
-      "type": "link",
-      "url": "https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ1Zt7KlkfMyOoHb9-Aydz4eDp3rzzr4Zpzgl3r0aizQHWVL1jbWvGD0xbd24AxJeoyqK-Jn7FDb"
+      "id": "help-me-choose",
+      "icon": "🧭",
+      "label": "Help me choose",
+      "type": "questionnaire",
+      "entry_intent": "help-me-choose"
     },
     {
-      "id": "faq",
-      "label": "❓ FAQ",
-      "type": "faq"
+      "id": "book-demo",
+      "icon": "📅",
+      "label": "Book a demo",
+      "type": "questionnaire",
+      "entry_intent": "book-demo"
     }
   ],
+
+  "questionnaires": {
+    "odm": {
+      "intro": "Full custom builds — your own device from the ground up: industrial design, PCB, acoustics, firmware and mass production. We've shipped custom voice hardware for healthcare, field service and consumer brands.",
+      "cta": "Answer 3 quick questions and we'll outline how we'd build it →",
+      "questions": [
+        {
+          "id": "product",
+          "label": "Product",
+          "q": "What do you want to build?",
+          "options": [
+            "Recorder / microphone",
+            "Wearable device (badge, clip, glasses, earbuds)",
+            "Speaker or headset",
+            "Call-answering device",
+            "Embed AI voice into my own product"
+          ]
+        },
+        {
+          "id": "industry",
+          "label": "Use case",
+          "q": "What's it for?",
+          "options": [
+            "Healthcare",
+            "Field service / on-site work",
+            "Office, sales & meetings",
+            "Consumer / retail product",
+            "Other"
+          ]
+        },
+        {
+          "id": "qty",
+          "label": "Quantity",
+          "q": "First-run quantity?",
+          "options": [
+            "Under 1,000",
+            "1,000 – 5,000",
+            "5,000+",
+            "Not sure yet"
+          ]
+        }
+      ],
+      "links": [
+        { "label": "ODM / OEM services", "url": "https://gmic.ai/ai-hardware-odm-oem/" },
+        { "label": "Custom enclosure design", "url": "https://gmic.ai/custom-hardware-enclosure-design/" }
+      ]
+    },
+
+    "add-branding": {
+      "intro": "Take one of our proven devices and make it yours — your logo, colors, packaging, even firmware tweaks. Faster and lower-cost than a full custom build. (a.k.a. private label / OEM)",
+      "cta": "Answer 3 quick questions and we'll tailor it →",
+      "questions": [
+        {
+          "id": "product",
+          "label": "Product",
+          "q": "Which product do you want to brand?",
+          "options": [
+            "Recorder / microphone",
+            "Wearable device",
+            "Speaker or headset",
+            "Telalive (call-answering)",
+            "Not sure — help me pick"
+          ]
+        },
+        {
+          "id": "depth",
+          "label": "Branding",
+          "q": "How far should the branding go?",
+          "options": [
+            "Logo only",
+            "Logo + colors & packaging",
+            "+ Firmware / UI tweaks (boot brand, LED, prompts)",
+            "Full works"
+          ]
+        },
+        {
+          "id": "qty",
+          "label": "Quantity",
+          "q": "Quantity & market?",
+          "options": [
+            "Under 1,000",
+            "1,000 – 5,000",
+            "5,000+",
+            "Not sure"
+          ]
+        }
+      ],
+      "links": [
+        { "label": "Private-label voice AI hardware", "url": "https://gmic.ai/private-label-voice-ai-hardware/" }
+      ]
+    },
+
+    "help-me-choose": {
+      "intro": "Not sure which device fits? Answer 3 quick questions and we'll point you to the right one — and you can grab a sample.",
+      "cta": "Find my device →",
+      "questions": [
+        {
+          "id": "usage",
+          "label": "Usage",
+          "q": "How will it be used?",
+          "options": [
+            "Worn hands-free (badge, clip, lanyard)",
+            "Handheld recorder",
+            "In-ear / headset",
+            "On a desk / in a room",
+            "To answer phone calls"
+          ]
+        },
+        {
+          "id": "where",
+          "label": "Environment",
+          "q": "Where will it be used?",
+          "options": [
+            "Clinic / healthcare",
+            "Field / outdoors",
+            "Office / meetings",
+            "Retail / front desk",
+            "Other"
+          ]
+        },
+        {
+          "id": "musthave",
+          "label": "Must-haves",
+          "q": "Any must-haves?",
+          "multi": true,
+          "options": [
+            "Security / encryption",
+            "Works offline (on-device storage)",
+            "Rugged / waterproof",
+            "Long battery life",
+            "No strong preference"
+          ]
+        }
+      ]
+    },
+
+    "book-demo": {
+      "intro": "See it live. Tell us what you'd like to see and we'll set it up.",
+      "cta": "Set up my demo →",
+      "questions": [
+        {
+          "id": "see",
+          "label": "Interest",
+          "q": "What would you like to see?",
+          "options": [
+            "A specific product",
+            "Our custom / ODM process",
+            "A use case for my industry",
+            "General overview"
+          ]
+        },
+        {
+          "id": "region",
+          "label": "Region",
+          "q": "Your region & preferred time?",
+          "options": [
+            "Americas",
+            "Europe",
+            "Asia-Pacific",
+            "Other / I'll type it"
+          ]
+        },
+        {
+          "id": "reach",
+          "label": "Contact",
+          "q": "Best way to reach you?",
+          "options": [
+            "Email",
+            "WhatsApp"
+          ]
+        }
+      ],
+      "result_link": {
+        "label": "Book your demo",
+        "url": "https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ1Zt7KlkfMyOoHb9-Aydz4eDp3rzzr4Zpzgl3r0aizQHWVL1jbWvGD0xbd24AxJeoyqK-Jn7FDb"
+      }
+    }
+  },
+
+  "recommend_rules": [
+    {
+      "when": { "usage": "To answer phone calls" },
+      "products": ["Telalive", "HA-TEL02"],
+      "link": "https://gmic.ai/telalive/",
+      "hint": "call-answering: Telalive integrates with a desk phone as a 24/7 receptionist; HA-TEL02 is a 4G handheld"
+    },
+    {
+      "when": { "usage": "On a desk / in a room", "musthave": "Rugged / waterproof" },
+      "products": ["HA-SPK01"],
+      "link": "https://gmic.ai/products/",
+      "hint": "waterproof desk/room speaker — SPK01 is IPX7"
+    },
+    {
+      "when": { "usage": "On a desk / in a room" },
+      "products": ["HA-SPK01", "HA-SPK03"],
+      "link": "https://gmic.ai/products/",
+      "hint": "desk/room speaker; SPK01 is IPX7"
+    },
+    {
+      "when": { "usage": "In-ear / headset" },
+      "products": ["HA-BC01"],
+      "link": "https://gmic.ai/products/",
+      "hint": "bone-conduction headset, IPX6, rugged for outdoor use"
+    },
+    {
+      "when": { "usage": "Worn hands-free (badge, clip, lanyard)", "where": "Clinic / healthcare" },
+      "products": ["HA-MIC06A", "HA-MIC05"],
+      "link": "https://gmic.ai/mic05-secure-ai-voice-recorder/",
+      "hint": "clinical-grade secure wearable recorder; MIC06A slide-touch, MIC05 hardware noise reduction + NFC security"
+    },
+    {
+      "when": { "usage": "Worn hands-free (badge, clip, lanyard)", "musthave": "Security / encryption" },
+      "products": ["HA-MIC05"],
+      "link": "https://gmic.ai/mic05-secure-ai-voice-recorder/",
+      "hint": "secure wearable recorder — MIC05 has hardware NFC security"
+    },
+    {
+      "when": { "usage": "Worn hands-free (badge, clip, lanyard)" },
+      "products": ["HA-MIC06A", "HA-MIC05"],
+      "link": "https://gmic.ai/mic05-secure-ai-voice-recorder/",
+      "hint": "wearable recorder for hands-free voice capture"
+    },
+    {
+      "when": { "usage": "Handheld recorder", "where": "Field / outdoors" },
+      "products": ["HA-MIC01", "HA-BC01"],
+      "link": "https://gmic.ai/mic01-push-to-talk-ai-voice-device/",
+      "hint": "rugged push-to-talk / bone-conduction for field work"
+    },
+    {
+      "when": { "usage": "Handheld recorder" },
+      "products": ["HA-MIC01"],
+      "link": "https://gmic.ai/mic01-push-to-talk-ai-voice-device/",
+      "hint": "handheld push-to-talk recorder"
+    }
+  ],
+  "recommend_default": {
+    "products": [],
+    "link": "https://gmic.ai/products/",
+    "hint": "no single obvious fit — point to the full product range and offer to have someone help narrow it down"
+  },
+
+  "moq_note": "Custom / private-label projects typically start around 2,000 units, though it depends on the build.",
+
   "contacts": [
     { "id": "whatsapp", "label": "WhatsApp", "icon": "💬", "url": "https://api.whatsapp.com/send/?phone=16699000008", "value": "+1 (669) 900-0008", "open_label": "Open WhatsApp" },
     { "id": "wechat",   "label": "WeChat",   "icon": "🟢", "type": "qr", "qr": "https://gmic.ai/wp-content/uploads/gmic-site/main/img/wechat-qr.png", "value": "Scan to add us on WeChat" },
@@ -33,6 +280,7 @@
     { "id": "email",    "label": "Email",    "icon": "✉️", "url": "mailto:trigg@gmic.ai", "value": "trigg@gmic.ai", "open_label": "Compose email" },
     { "id": "call",     "label": "Call",     "icon": "📞", "url": "tel:+16699000008", "value": "+1 (669) 900-0008", "open_label": "Call now" }
   ],
+
   "faq": [
     {
       "q": "What do you do?",
@@ -41,7 +289,7 @@
     },
     {
       "q": "Do you offer custom / white-label (ODM/OEM)? What is the MOQ?",
-      "a": "Yes — full ODM/OEM is our core: custom enclosure, firmware, tuning, and mass production, all under your brand. MOQ depends on the product and complexity (typically a few hundred to a few thousand units). Tell us what you're building and your target quantity, and we'll give you an exact figure.",
+      "a": "Yes — full ODM/OEM is our core: custom enclosure, firmware, tuning, and mass production, all under your brand. Custom / private-label projects typically start around 2,000 units, though it depends on the build. Tell us what you're building and your target quantity, and we'll give you an exact figure.",
       "link": "https://gmic.ai/ai-hardware-odm-oem/"
     },
     {

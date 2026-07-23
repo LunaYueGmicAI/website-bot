@@ -145,23 +145,26 @@ def _enqueue(job, desc):
 # ======================== 卡片渲染 ========================
 def _card_text(session):
     """
-    把会话渲染成"线索卡"文本。每次 lead/entry_intent 变了,就用这个重新生成、覆盖那张卡。
-    例:lead={email:"a@x.com", need:"recorder", missing:["name"]}, entry_intent="odm" →
-        一张列着 Entry/Contact/Name/Need/Source/Missing 的卡片文本。
+    把会话渲染成"线索卡"文本。每次 lead/entry_intents 变了,就用这个重新生成、覆盖那张卡。
+    例:lead={email:"a@x.com", need:"recorder", missing:["name"]}, entry_intents=["odm","help-me-choose"] →
+        一张列着 Entry/Contact/Name/Need/Source/Missing 的卡片文本("入口"行列出走过的所有入口)。
 
-    注意 Entry 和 Need 的区别:Entry=从哪个按钮进来(入口,不变);Need=对话里演变出的真实诉求。
-    用户可能从 ODM 进来但聊着聊着变成"就想买现货"——那时 Entry 仍是 odm,Need 会更新成后者。
+    注意 Entry 和 Need 的区别:Entry=走过哪些入口按钮/Tab(累积、去重,首个为主归因);
+    Need=对话里演变出的真实诉求。用户可能从 ODM 进来、又点了选型,聊着聊着变成"就想买现货"——
+    那时 Entry 仍是 ["odm","help-me-choose"](记录走过的路),Need 会更新成后者。
     """
     lead = session.get("lead") or {}
-    entry_intent = session.get("entry_intent") or "—"
-    # ⭐ 来源区分:语音留言(entry_intent=="voice-message",由 /voice/message 种)走"语音直达"卡头,
-    #   其余都是聊天询盘。团队在频道里一眼就能分辨这条线索是打字聊出来的还是直接发的语音留言。
+    # entry_intents 是【列表】(累积、去重):用户走过的入口按钮/问卷 Tab / 语音留言。
+    entry_intents = session.get("entry_intents") or []
+    # ⭐ 来源区分:语音留言(entry_intents 含 "voice-message",由 /voice/message 种;语音走一次性会话,
+    #   故这条会话就只有它)走"语音直达"卡头,其余都是聊天询盘。团队在频道里一眼就能分辨这条线索
+    #   是打字聊出来的还是直接发的语音留言。
     # ⭐ 卡片标签统一【简体中文】(团队看得快):只有【标签】是中文,【值】一律原样——
     #   need/留言用用户说的语言总结(中文就中文、英文就英文),称呼、邮箱、电话、URL 都不翻译。
-    is_voice = entry_intent == "voice-message"
+    is_voice = "voice-message" in entry_intents
     header = "*🎙️ 新语音留言*" if is_voice else "*💬 新聊天询盘*"
-    # 语音留言的"入口"行显示"🎙️ 语音留言"更直观;聊天则显示入口按钮标识(odm/—)。
-    entry_display = "🎙️ 语音留言" if is_voice else entry_intent
+    # 语音留言的"入口"行显示"🎙️ 语音留言"更直观;聊天则把走过的入口用 " → " 串起来(空则 —)。
+    entry_display = "🎙️ 语音留言" if is_voice else (" → ".join(entry_intents) if entry_intents else "—")
     # 联系方式拆成 邮箱 / 电话 / 即时通讯 各一行:给了哪个显示哪个(以前压成一个,email 优先 →
     # 用户报了 phone/IM 反而看不到,现在都单独列)。
     email = lead.get("email")

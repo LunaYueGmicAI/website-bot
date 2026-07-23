@@ -4,6 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>GMIC AI — Chat</title>
+<!-- 官网同款字体 Inter;加载失败自动回落到系统字体栈(见 :root font-family) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   /* ============================================================
      GMIC 网站咨询 widget —— 聊天(纯文字)。单文件自包含,做成 iframe 独立页。
@@ -11,10 +15,10 @@
         这里【只做文字聊天】,不含任何语音代码。
      ============================================================ */
   :root {
-    --accent: #2563eb; --accent-ink: #ffffff; --bg: #ffffff; --panel: #f5f6f9;   /* 主色对齐 gmic.ai 官网蓝 */
+    --accent: #2563eb; --accent-deep: #1e40af; --accent-ink: #ffffff; --bg: #ffffff; --panel: #f5f6f9;   /* 主色对齐 gmic.ai 官网蓝;deep=更深一档,给专题标题条 */
     --bubble-bot: #eef0f6; --bubble-user: var(--accent); --text: #1f2430;
     --muted: #7a8194; --border: #e3e6ef; --radius: 16px;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #14161c; --panel: #1b1e26; --bubble-bot: #232733; --text: #eceef4; --muted: #9aa2b4; --border: #2a2f3b; }
@@ -73,6 +77,46 @@
   .icon-btn { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer; font-size: 17px; display: grid; place-items: center; }
   #send { background: var(--accent); color: var(--accent-ink); }
   #send:disabled { opacity: .4; cursor: default; }
+
+  /* ── 问卷(guided questionnaire)向导卡:一题一屏,内联在消息流里,随进度原地重绘 ── */
+  .q-panel { align-self: stretch; border: 1px solid var(--border); background: var(--bg);
+    border-radius: 16px; padding: 0; display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 4px 18px rgba(20, 22, 30, .08); }
+  /* 专题头:图标 + 标题,给"进入了这个专题"的仪式感(不切屏,历史仍在上方可滑)。
+     用实心品牌蓝底 + 白字(不用灰):浅色/深色模式对比度都高,一眼是彩色标题条。
+     ⭐ 所有主题共用同一个 accent 色(不做一主题一色)——主题靠图标+文字区分,颜色统一才不乱、才贴官网品牌。 */
+  .q-head { display: flex; align-items: center; gap: 9px; padding: 11px 14px;
+    background: var(--accent); }   /* 亮蓝标题条(与深蓝 CTA 对调:标题亮、动作深) */
+  .q-head .ic { font-size: 19px; line-height: 1; }
+  .q-head .tt { font-size: 13.5px; font-weight: 700; color: #fff; letter-spacing: .2px; }
+  .q-body { padding: 14px; display: flex; flex-direction: column; gap: 11px; }
+  .q-intro { font-size: 13.5px; line-height: 1.55; color: var(--text); }
+  /* 进度做成显著的小徽章 + 圆点条 */
+  .q-progress { display: inline-flex; align-items: center; gap: 8px; }
+  .q-progress .pill { font-size: 10.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+    color: var(--accent); background: rgba(37, 99, 235, .1); padding: 3px 9px; border-radius: 999px; }
+  .q-progress .dots { display: inline-flex; gap: 4px; }
+  .q-progress .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
+  .q-progress .dots i.on { background: var(--accent); }
+  .q-title { font-size: 15px; font-weight: 650; line-height: 1.4; }
+  .q-opts { display: flex; flex-direction: column; gap: 7px; }
+  .q-opt { text-align: left; font-size: 13.5px; padding: 11px 13px; border-radius: 11px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; transition: .12s; }
+  .q-opt:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
+  .q-opt.sel { border-color: var(--accent); background: rgba(37, 99, 235, .08); color: var(--accent); font-weight: 600; }
+  .q-opt.sel::before { content: "✓ "; }
+  .q-cta { align-self: flex-start; font-size: 13.5px; font-weight: 650; padding: 10px 18px; border-radius: 11px;
+    border: none; background: var(--accent-deep); color: var(--accent-ink); cursor: pointer; }   /* 深蓝主动作(与亮蓝标题条对调) */
+  /* 导航:Back / Skip / Next 都是有框按钮(点击区大,mobile 友好)。层次:
+       Back / Skip → 淡蓝【二级】(有色但不抢);  Next / Done → 深蓝【主动作】(和 CTA 同色)。
+     ⚠️ 这些规则都 scope 在 .q-nav 下,不碰顶部那排 quickAction Tab 按钮(它们用 .quick-col .q-btn)。 */
+  .q-nav { display: flex; gap: 8px; align-items: center; margin-top: 3px; }
+  .q-nav .q-btn { font-size: 12.5px; font-weight: 600; padding: 8px 14px; border-radius: 10px;
+    border: 1px solid rgba(37, 99, 235, .30); background: rgba(37, 99, 235, .07); color: var(--accent);
+    cursor: pointer; transition: .12s; }
+  .q-nav .q-btn:hover { border-color: var(--accent); background: rgba(37, 99, 235, .14); }
+  .q-nav .q-next { margin-left: auto; border-color: var(--accent-deep); background: var(--accent-deep); color: var(--accent-ink); }
+  .q-nav .q-next:hover { border-color: var(--accent-deep); background: var(--accent-deep); color: var(--accent-ink); opacity: .92; }
 </style>
 </head>
 <body>
@@ -102,6 +146,7 @@ if (!sessionId) {
   localStorage.setItem(SID_KEY, sessionId);
 }
 let CONFIG = null, busy = false;
+let qState = null;   // 问卷进行中的状态 {tab, questions, idx, answers, panel, def};不在问卷中 = null
 
 async function postJSON(path, body) {
   const res = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -126,23 +171,53 @@ function showTyping() {
   return () => el.remove();
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 把一段较长的 bot 回复拆成 2-3 句一条的短气泡(现代 chat UI 惯例:短气泡比一大坨易读)。
+// 策略保守:先按换行分段;某段仍过长(>180 字符)才从中点最近的句末切一刀,避免误伤缩写/型号里的点号。
+function splitReply(text) {
+  const t = (text || "").trim();
+  const paras = t.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  const out = [];
+  for (const p of paras) {
+    if (p.length <= 180) { out.push(p); continue; }
+    const mid = Math.floor(p.length / 2);
+    let cut = -1; const re = /[.!?。!?](\s|$)/g; let m;
+    while ((m = re.exec(p))) { if (cut < 0 || Math.abs(m.index - mid) < Math.abs(cut - mid)) cut = m.index + 1; }
+    if (cut > 0 && cut < p.length) { out.push(p.slice(0, cut).trim()); out.push(p.slice(cut).trim()); }
+    else out.push(p);
+  }
+  return out.length ? out : [t];
+}
+
+// 逐条吐出短气泡(条间留一点停顿,像真人打字);opts(如 link)只挂到最后一条。
+async function addBotReply(text, opts = {}) {
+  const parts = splitReply(text);
+  for (let i = 0; i < parts.length; i++) {
+    addBubble("bot", parts[i], i === parts.length - 1 ? opts : {});
+    if (i < parts.length - 1) await sleep(350);
+  }
+}
+
 function renderQuickColumn() {
   const col = document.createElement("div"); col.className = "quick-col";
   for (const a of CONFIG.quickActions || []) {
-    const btn = document.createElement("button"); btn.className = "q-btn"; btn.textContent = a.label;
+    const btn = document.createElement("button"); btn.className = "q-btn";
+    btn.textContent = (a.icon ? a.icon + "  " : "") + a.label;   // ⭐ 带上 config 里的 icon(之前漏了)
     btn.onclick = () => onQuickAction(a); col.appendChild(btn);
   }
   messagesEl.appendChild(col); scrollDown();
 }
 async function onQuickAction(a) {
-  if (busy) return;
+  if (busy || qState) return;                       // 问卷进行中不接受别的快捷动作
+  if (a.type === "questionnaire") { startQuestionnaire(a); return; }
   if (a.type === "link") {
     if (a.url && !a.url.startsWith("TODO")) window.open(a.url, "_blank", "noopener");
     postJSON("/event", { session_id: sessionId, action: "link", id: a.id }).catch(() => {}); return;
   }
   if (a.type === "topic") {
     setBusy(true); const stop = showTyping();
-    try { const r = await postJSON("/event", { session_id: sessionId, action: "topic", id: a.id }); stop(); if (r.reply) addBubble("bot", r.reply); }
+    try { const r = await postJSON("/event", { session_id: sessionId, action: "topic", id: a.id }); stop(); if (r.reply) await addBotReply(r.reply); }
     catch (e) { stop(); addBubble("bot", "Sorry, something went wrong. Please try again."); }
     setBusy(false); return;
   }
@@ -160,7 +235,7 @@ function renderFaqChips() {
 async function onFaq(index, question) {
   if (busy) return;
   addBubble("user", question); setBusy(true); const stop = showTyping();
-  try { const r = await postJSON("/event", { session_id: sessionId, action: "faq", index }); stop(); addBubble("bot", r.reply, { link: r.link }); }
+  try { const r = await postJSON("/event", { session_id: sessionId, action: "faq", index }); stop(); await addBotReply(r.reply, { link: r.link }); }
   catch (e) { stop(); addBubble("bot", "Sorry, something went wrong. Please try again."); }
   setBusy(false);
 }
@@ -190,6 +265,147 @@ function renderThrowbacks(list) {
   }
 }
 
+/* ============================================================
+   问卷(guided questionnaire)—— 一题一屏的向导,内联在消息流里。
+   全程【不调 LLM】:前端自己收集答案,只在答完最后一题时一次性 POST /questionnaire。
+   ⭐ 问卷进行中【锁住文字输入】(只能选/Skip/Back),避免中途插话;答完 bot 出方案后恢复。
+   ============================================================ */
+function lockInput(locked) {
+  // 锁/解底部输入栏。锁住时禁用输入框 + 改占位文案;解锁时按是否有内容决定发送键。
+  textEl.disabled = locked;
+  textEl.placeholder = locked ? "Answering a few quick questions…" : "Type your message…";
+  sendBtn.disabled = locked || busy || !textEl.value.trim();
+}
+
+function qHead() {
+  // 专题头(图标 + Tab 标题):给"进入了这个专题"的仪式感,但不切屏、历史仍在上方可滑。
+  const h = document.createElement("div"); h.className = "q-head";
+  const ic = document.createElement("span"); ic.className = "ic"; ic.textContent = qState.icon || "💬";
+  const tt = document.createElement("span"); tt.className = "tt"; tt.textContent = qState.label || "A few questions";
+  h.append(ic, tt); return h;
+}
+
+function startQuestionnaire(action) {
+  // 点某个 questionnaire 型 Tab → 建向导卡(会随进度原地重绘),先显示 intro。
+  const def = (CONFIG.questionnaires || {})[action.entry_intent];
+  if (!def) return;
+  qState = { tab: action.entry_intent, icon: action.icon || "", label: action.label || "",
+             questions: def.questions || [], idx: -1, answers: {}, panel: null, def };
+  lockInput(true);
+  const panel = document.createElement("div"); panel.className = "q-panel";
+  messagesEl.appendChild(panel); qState.panel = panel;
+  renderIntro();
+}
+
+function renderIntro() {
+  // intro 屏:专题头 + 一句业务介绍 + CTA(进问卷)+ Skip(直接自由聊,不做问卷)。
+  const { def, panel } = qState;
+  panel.innerHTML = ""; panel.appendChild(qHead());
+  const body = document.createElement("div"); body.className = "q-body";
+  const intro = document.createElement("div"); intro.className = "q-intro"; intro.textContent = def.intro || "";
+  const cta = document.createElement("button"); cta.className = "q-cta";
+  cta.textContent = def.cta || "Answer a few questions →"; cta.onclick = () => goToQuestion(0);
+  const nav = document.createElement("div"); nav.className = "q-nav";
+  const skip = document.createElement("button"); skip.className = "q-btn"; skip.textContent = "Skip — just chat";
+  skip.onclick = skipQuestionnaire; nav.appendChild(skip);
+  body.append(intro, cta, nav); panel.appendChild(body); scrollDown();
+}
+
+function goToQuestion(idx) { qState.idx = idx; renderQuestion(); }
+
+function renderQuestion() {
+  // 当前这一题:专题头 + 进度(徽章+圆点)+ 题干 + 选项 + 导航(Back/Skip,多选题多一个 Next/Done)。
+  const { questions, idx, answers, panel } = qState;
+  const q = questions[idx];
+  const isMulti = !!q.multi;
+  const selected = isMulti ? new Set(answers[q.id] || []) : null;   // 多选:进来先回显已选(支持 Back 回来改)
+  panel.innerHTML = ""; panel.appendChild(qHead());
+  const body = document.createElement("div"); body.className = "q-body";
+
+  // 进度:显著的小徽章 + 圆点条(已过/当前点亮)
+  const prog = document.createElement("div"); prog.className = "q-progress";
+  const pill = document.createElement("span"); pill.className = "pill";
+  pill.textContent = `Question ${idx + 1} of ${questions.length}`;
+  const dots = document.createElement("span"); dots.className = "dots";
+  for (let i = 0; i < questions.length; i++) { const d = document.createElement("i"); if (i <= idx) d.className = "on"; dots.appendChild(d); }
+  prog.append(pill, dots);
+
+  const title = document.createElement("div"); title.className = "q-title"; title.textContent = q.q;
+  const opts = document.createElement("div"); opts.className = "q-opts";
+  for (const opt of q.options || []) {
+    const b = document.createElement("button"); b.className = "q-opt"; b.textContent = opt;
+    if (isMulti && selected.has(opt)) b.classList.add("sel");
+    b.onclick = () => {
+      if (isMulti) {                                     // 多选:切换选中,等点 Next 再记录
+        if (selected.has(opt)) { selected.delete(opt); b.classList.remove("sel"); }
+        else { selected.add(opt); b.classList.add("sel"); }
+      } else {                                           // 单选:选中即记 + 自动进下一题(snappy)
+        answers[q.id] = opt; advance();
+      }
+    };
+    opts.appendChild(b);
+  }
+
+  const nav = document.createElement("div"); nav.className = "q-nav";
+  const back = document.createElement("button"); back.className = "q-btn"; back.textContent = "← Back";
+  back.onclick = () => { if (idx === 0) renderIntro(); else goToQuestion(idx - 1); };   // 第一题的 Back 回 intro
+  const skip = document.createElement("button"); skip.className = "q-btn"; skip.textContent = "Skip";
+  skip.onclick = () => { delete answers[q.id]; advance(); };                            // Skip:不记这题
+  nav.append(back, skip);
+  if (isMulti) {                                          // 多选题需要显式 Next/Done(选完再走)
+    const next = document.createElement("button"); next.className = "q-btn q-next";
+    next.textContent = idx === questions.length - 1 ? "Done →" : "Next →";
+    next.onclick = () => { if (selected.size) answers[q.id] = [...selected]; else delete answers[q.id]; advance(); };
+    nav.appendChild(next);
+  }
+  body.append(prog, title, opts, nav); panel.appendChild(body); scrollDown();
+}
+
+function advance() {
+  // 还有下一题就翻页,否则提交。
+  if (qState.idx < qState.questions.length - 1) goToQuestion(qState.idx + 1);
+  else submitQuestionnaire();
+}
+
+async function submitQuestionnaire() {
+  // 答完:把选择渲染成一条紧凑 user 气泡(每行"标签: 答案")→ POST /questionnaire → bot 方案 + 链接。
+  const { tab, questions, answers, panel } = qState;
+  const picked = questions.filter(q => answers[q.id] != null).map(q => {
+    const v = answers[q.id]; const val = Array.isArray(v) ? v.join(", ") : v;
+    return `${q.label || q.q}: ${val}`;                  // 例:"Usage: On a desk / in a room"
+  });
+  panel.remove();
+  addBubble("user", picked.length ? picked.join("\n") : "(skipped the questions)");
+  const payload = { session_id: sessionId, tab, answers, page_url: document.referrer || location.href };
+  qState = null; lockInput(false);                       // 问卷结束,恢复输入
+  setBusy(true); const stop = showTyping();
+  try {
+    const r = await postJSON("/questionnaire", payload);
+    stop(); await addBotReply(r.reply || "…"); renderLinks(r.links); renderThrowbacks(r.contacts);
+  } catch (e) { stop(); addBubble("bot", "Sorry, something went wrong — please try again."); }
+  setBusy(false);
+}
+
+function skipQuestionnaire() {
+  // intro 处点 Skip:撤掉向导卡,直接进自由聊。
+  if (qState && qState.panel) qState.panel.remove();
+  qState = null; lockInput(false);
+  addBubble("bot", "No problem — tell me what you're looking for, or ask me anything.");
+}
+
+function renderLinks(links) {
+  // /questionnaire 返回的链接渲染成一条 bot 气泡里的若干药丸;标签本身已是描述性短语(如 "See HA-SPK01")。
+  const arr = (links || []).filter(l => l && l.url);
+  if (!arr.length) return;
+  const el = document.createElement("div"); el.className = "msg bot"; el.textContent = "Here's more on that 👇";
+  for (const l of arr) {
+    const a = document.createElement("a"); a.className = "learn-more"; a.href = l.url; a.target = "_blank";
+    a.rel = "noopener"; a.textContent = (l.label || "Open") + " →";
+    el.appendChild(document.createElement("br")); el.appendChild(a);
+  }
+  messagesEl.appendChild(el); scrollDown();
+}
+
 async function sendText() {
   const text = textEl.value.trim();
   if (!text || busy) return;
@@ -197,7 +413,7 @@ async function sendText() {
   setBusy(true); const stop = showTyping();
   try {
     const r = await postJSON("/chat", { session_id: sessionId, text, page_url: document.referrer || location.href });
-    stop(); addBubble("bot", r.reply || "…"); renderThrowbacks(r.contacts);
+    stop(); await addBotReply(r.reply || "…"); renderThrowbacks(r.contacts);
   } catch (e) { stop(); addBubble("bot", "Sorry, I'm having trouble right now — please try again in a moment."); }
   setBusy(false);
 }

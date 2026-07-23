@@ -42,7 +42,11 @@ talking both land in the **same free AI conversation** (voice just goes through 
 ```
 session[session_id] = {
   created_at, last_seen,                 # for TTL / LRU
-  entry_intent: "odm" | null,            # ENTRY tag: which topic button they came in via (single value, first-wins)
+  entry_intents: ["odm", ...],           # ENTRY tags: every entry the visitor used (topic button / questionnaire Tab /
+                                          # voice-message), appended in arrival order, DEDUPED. [0] = primary attribution.
+  answers: {tab: {qid: value|[values]}}, # questionnaire answers BUCKETED per Tab (one bucket per Tab done; re-doing a
+                                          # Tab overwrites its bucket, a new Tab adds one) — multiple questionnaires coexist.
+  recommendations: {tab: {...}},         # per-Tab recommendation (products/link/hint); only help-me-choose produces one.
   lead: {name, email, phone, messengers:[...], company, need, missing:[...]},  # ONE record, backfilled; `need` = evolving intent
                                           # messengers = LIST (WhatsApp/WeChat/Telegram...), ONE per platform,
                                           # latest wins (different platforms union; same platform overwrites).
@@ -55,9 +59,10 @@ session[session_id] = {
 
 - `session_id` is the master key: (1) RAM dict key, (2) Slack thread owner, (3) frontend
   identity (stored in browser localStorage → survives page reload).
-- `lead` + `entry_intent` = small durable **facts**, merged/overwritten as the chat reveals info
-  (NOT one entry per turn). `entry_intent` = where they entered (fixed); `lead.need` = what they
-  want now (evolves each turn) — a mid-chat pivot updates `need`, not `entry_intent`.
+- `lead` + `entry_intents` + `answers` = small durable **facts**, merged as the chat reveals info
+  (NOT one entry per turn). `entry_intents` = which entries they used (accumulated, deduped, first = primary);
+  `answers` = what they picked in each questionnaire Tab; `lead.need` = what they want now (evolves each
+  turn) — a mid-chat pivot updates `need`, not `entry_intents`.
 - `turns` = verbose, disposable **history**.
 
 ## Memory management (§Memory)
@@ -68,8 +73,8 @@ session[session_id] = {
   Because Slack has everything, RAM can be trimmed/evicted losslessly.
 
 **Sent to the LLM each turn (bounded prompt):**
-`system prompt + entry_intent + lead summary + last N turns (sliding window)` — NOT full history.
-Trimmed old turns already live in Slack. Facts (entry_intent/lead) survive trimming cheaply.
+`system prompt + entry_intents + questionnaire answers + lead summary + last N turns (sliding window)` — NOT full history.
+Trimmed old turns already live in Slack. Facts (entry_intents/answers/lead) survive trimming cheaply.
 
 **Four bounds on RAM growth:**
 1. Per-session turn cap (`MAX_TURNS_IN_MEMORY`, keep newest).
@@ -126,7 +131,7 @@ persisted to disk. `/event` (button clicks) creates the session + Slack card but
 canned reply without touching the LLM.
 
 **Slack cards are tagged by source:** voice messages render `*🎙️ New VOICE message*`, chat
-inquiries render `*💬 New CHAT inquiry*` (branch on `entry_intent == "voice-message"`), so the
+inquiries render `*💬 New CHAT inquiry*` (branch on `"voice-message" in entry_intents`), so the
 team can tell at a glance which leads came in by voice vs typed chat.
 
 **Slack delivery = in-process queue + single worker (`integrations/slack.py`).** Slack limits a

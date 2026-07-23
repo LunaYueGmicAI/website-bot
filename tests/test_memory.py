@@ -34,7 +34,28 @@ def main():
     ok &= _check("missing empty once need+contact present", lead["missing"] == [] and lead["email"] == "a@x.com", lead)
 
     S.set_entry_intent("u1", "products")
-    ok &= _check("first entry_intent not clobbered", S.snapshot("u1")["entry_intent"] == "odm", S.snapshot("u1")["entry_intent"])
+    # entry_intents 现在是【累积列表】:按到达顺序追加,第一个(odm)为主归因、不被冲掉。
+    ok &= _check("entry_intents accumulate in arrival order",
+                 S.snapshot("u1")["entry_intents"] == ["odm", "products"], S.snapshot("u1")["entry_intents"])
+    S.set_entry_intent("u1", "odm")   # 重复触发同一入口 → 去重,不再追加
+    ok &= _check("entry_intents dedupe repeat entry",
+                 S.snapshot("u1")["entry_intents"] == ["odm", "products"], S.snapshot("u1")["entry_intents"])
+
+    # ---- 问卷答案【按 Tab 分桶】(多份问卷并存)+ 推荐【按 Tab 分桶】----
+    S.set_questionnaire("u1", "odm", {"product": "Recorder / microphone"}, None)
+    S.set_questionnaire("u1", "help-me-choose", {"usage": "To answer phone calls"},
+                        {"products": ["Telalive"], "link": "https://gmic.ai/telalive/", "hint": "call-answering"})
+    snap = S.snapshot("u1")
+    ok &= _check("answers bucketed per tab (both kept)",
+                 set(snap["answers"]) == {"odm", "help-me-choose"}
+                 and snap["answers"]["odm"] == {"product": "Recorder / microphone"}, snap["answers"])
+    ok &= _check("recommendation stored only for tabs that produce one",
+                 list(snap["recommendations"]) == ["help-me-choose"], snap["recommendations"])
+    S.set_questionnaire("u1", "odm", {"product": "Speaker or headset"}, None)   # 同 Tab 再提交 → 覆盖该桶
+    ok &= _check("re-submit same tab overwrites only its bucket",
+                 S.snapshot("u1")["answers"]["odm"] == {"product": "Speaker or headset"}
+                 and set(S.snapshot("u1")["answers"]) == {"odm", "help-me-choose"},
+                 S.snapshot("u1")["answers"])
 
     # ---- messengers(列表联系方式,按平台去重、同平台留最新)----
     # 只给一个 IM(没 email/phone)→ 也算有联系方式 → missing 不含 contact。
@@ -65,6 +86,16 @@ def main():
                  (WC.contact_for_channel("phone") or {}).get("id"))
     ok &= _check("contact_for_channel: unknown->None", WC.contact_for_channel("line") is None and WC.contact_for_channel("") is None,
                  "line->None, ''->None")
+
+    # ---- recommend_for:多选题(musthave 列表)参与选型 ----
+    # 选了"防水"(多选列表)→ 命中更具体的 desk+waterproof 规则 → 只推 SPK01(IPX7)。
+    rec = WC.recommend_for({"usage": "On a desk / in a room",
+                            "musthave": ["Long battery life", "Rugged / waterproof"]})
+    ok &= _check("multi-select musthave narrows desk → SPK01", rec.get("products") == ["HA-SPK01"], rec.get("products"))
+    # 没选防水 → 落回宽泛 desk 规则 → SPK01+SPK03(证明多选"包含"匹配没误伤单选路径)。
+    rec = WC.recommend_for({"usage": "On a desk / in a room", "musthave": ["Long battery life"]})
+    ok &= _check("desk without waterproof → general rule",
+                 rec.get("products") == ["HA-SPK01", "HA-SPK03"], rec.get("products"))
 
     S.get_or_create("u2"); S.get_or_create("u3"); S.get_or_create("u4")
     ok &= _check("LRU evicts u1", S.snapshot("u1") is None and S.snapshot("u4") is not None, S.stats())

@@ -104,10 +104,10 @@ def _system(session, faq):
     这几块合起来,就是"只带精华、不带全部历史"里的"精华"。
 
     参数:
-      session: 会话快照,这里只取 entry_intent(从哪进来)+ lead(已知/还缺什么)。
+      session: 会话快照,这里取 entry_intents(走过哪些入口)+ answers/recommendations(问卷)+ lead(已知/还缺什么)。
       faq:     widget.json 里的 FAQ 问答列表(见 prompts.faq_reference),用来统一 bot 自由回答的口径。
 
-    例:session={entry_intent:"odm", lead:{email:"a@x.com", missing:["need"]}}、faq=[已填好1条] →
+    例:session={entry_intents:["odm"], lead:{email:"a@x.com", missing:["need"]}}、faq=[已填好1条] →
         拼出的 system 文本大致是:
           <PERSONA 人设与目标>
           The visitor came in via the ODM/OEM ... ask about product, quantity, and timeline.
@@ -118,9 +118,18 @@ def _system(session, faq):
         → 模型既知道该顺着 ODM 问、口径对齐 FAQ,又知道还得把 need 套出来。
     """
     blocks = [prompts.PERSONA]
-    il = prompts.entry_intent_line(session.get("entry_intent"))
+    # entry_intents 是【列表】(用户走过的入口,累积去重);取第一个 = 主归因("最初从哪来")作开场种子。
+    # 具体走过哪些 Tab、每个选了什么,由下面的问卷块(questionnaire_line)完整呈现,这里不重复。
+    entries = session.get("entry_intents") or []
+    il = prompts.entry_intent_line(entries[0] if entries else None)
     if il:                                     # 认不出入口意图(自由聊)→ il 为空 → 这块不放
         blocks.append(il)
+    # 问卷块:用户在【各个 Tab】答过的选择 +(有推荐的 Tab)推荐。放在入口意图之后、FAQ 之前,让模型
+    # 顺着答案出方案、且后续每轮都带着(答案按 Tab 分桶存会话里,这里每轮重新拼)→ bot 绝不重复问答过的题。
+    # 没做过任何问卷 → ql 为空 → 不放。
+    ql = prompts.questionnaire_line(session.get("answers"), session.get("recommendations"))
+    if ql:
+        blocks.append(ql)
     fr = prompts.faq_reference(faq)
     if fr:                                     # 一条 FAQ 都没填好 → fr 为空 → 这块不放
         blocks.append(fr)

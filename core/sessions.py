@@ -118,8 +118,17 @@ class SessionStore:
                     "id": sid,
                     "created_at": _now(),
                     "last_seen": _now(),     # 相当于 updated_at:每次活动刷新,TTL/LRU 都看它
-                    "entry_intent": None,    # 入口意图:进来时点的话题按钮(如 "odm");单值、首次锁定不变;None = 自由聊/其它
-                                             # 注意:这只是"从哪进来"的入口标签;对话中演变的真实诉求看 lead.need
+                    "entry_intents": [],     # 入口意图【列表】:用户每走一个入口(话题按钮 / 问卷 Tab / 语音留言)
+                                             #   就累积一项;按到达顺序、去重(同一入口不重复记),见 set_entry_intent。
+                                             #   entry_intents[0] = 主归因("最初从哪来",投放/转化用);后续项 = 走过的其它入口。
+                                             #   注意:这只是"从哪些入口进来";对话中演变的真实诉求看 lead.need。
+                    "answers": {},           # 问卷答案【按 Tab 分桶】:{tab: {题目id: 选中选项(字符串) 或 多选列表}}。
+                                             #   由确定性前端收集、每个 Tab 一次性提交(见 /questionnaire、set_questionnaire):
+                                             #   同一 Tab 再答 = 覆盖该桶;换个 Tab = 新增一桶 → 多份问卷并存、互不冲掉。
+                                             #   之后每轮整体注入 LLM 系统提示 → bot 顺着答案出方案、绝不重复问答过的题。
+                    "recommendations": {},   # 问卷推荐【按 Tab 分桶】:{tab: 推荐dict(products/link/hint)}。
+                                             #   目前只有 help-me-choose(Tab3)按 recommend_rules 算推荐,故通常只有它一个键;
+                                             #   其它 Tab 不产生推荐(不写入)。供 LLM 出方案 + 前端取链接。
                     "lead": {},              # 线索:边聊边回填的"一条"记录(不是每轮一条)
                     "turns": [],             # 逐句对话:每说一句 append 一条,有上限
                     "slack_thread_ts": None, # 这通对话在 Slack 那条 thread 的根消息 ID(不是时间!)
@@ -143,18 +152,54 @@ class SessionStore:
     # ======================== 写入 ========================
     def set_entry_intent(self, sid, entry_intent):
         """
-        种下"入口意图"(用户进来时点的话题按钮)。规则:第一个话题按钮说了算,后面不覆盖。
+        累积一个"入口意图"(用户走过的一个入口:话题按钮 / 问卷 Tab / 语音留言)。
+        规则:【按到达顺序追加、去重】——同一入口重复触发不重复记;第一个仍然排在最前(=主归因)。
 
-        为什么首次锁定:这个字段记录的是"从哪个入口进来"(投放/转化归因用),是一个确定性的
-        入口信号,不该被后续点击冲掉。而"用户聊着聊着诉求变了"由 lead.need 承接(每轮 LLM 重抽、
-        非空即覆盖),两者分工:entry_intent=从哪进来(不变),need=现在想要什么(随对话演变)。
+        为什么改成累积(而非早期的"首次锁定单值"):一个用户可能先点 ODM 问卷、再点 Help me choose 问卷,
+        每一个都是一次真实的入口/意图,应该都留下来(和 answers 按 Tab 分桶一一对应,不再出现
+        "入口显示 odm 但答案却是 help-me-choose"的错位)。entry_intents[0] 依旧承担"最初从哪来"的
+        归因语义(投放/转化),不会被后来的入口冲掉;后续项记录其它走过的入口。
+        而"用户聊着聊着诉求变了"仍由 lead.need 承接(每轮 LLM 重抽、非空即覆盖):
+        entry_intents=走过哪些入口(累积、去重),need=现在想要什么(随对话演变)。
 
-        例:用户先点 [🏭 ODM] → entry_intent="odm";之后即使又触发别的话题,也不把 "odm" 冲掉。
+        例:先点 [🏭 ODM] → entry_intents=["odm"];再点 [🧭 Help me choose] → ["odm","help-me-choose"];
+            又点一次 ODM(重复)→ 仍是 ["odm","help-me-choose"](去重,不追加)。
         """
         with self._lock:
             s = self._data.get(sid)
-            if s and not s["entry_intent"]:
-                s["entry_intent"] = entry_intent
+            if s and entry_intent and entry_intent not in s["entry_intents"]:
+                s["entry_intents"].append(entry_intent)   # 按到达顺序追加;已存在则不重复记(去重)
+
+    def set_questionnaire(self, sid, tab, answers, recommendation=None):
+        """
+        存一次问卷的结果:确定性前端收集的【答案】+(仅 Tab3)按规则算出的【推荐】,【按 Tab 分桶】。
+
+        为什么按 Tab 分桶(而非早期的"整包覆盖单份"):一个用户可能连做多份问卷(先 ODM、再选型),
+        每份都该独立保留、互不冲掉。所以答案存进 answers[tab]、推荐存进 recommendations[tab]:
+          - 同一个 Tab 再提交一次 → 覆盖该 Tab 那个桶(问卷是"答完一次性提交",单桶内不累加,覆盖即可);
+          - 换一个 Tab 提交 → 新增一个桶,已有的桶原样保留。
+        这和 set_entry_intent 的累积一一对应(走过哪些 Tab ↔ 每个 Tab 选了什么),不会再错位。
+
+        和 entry_intents 的分工:entry_intents 记"走过哪些入口/Tab"(累积、去重),
+        answers 记"在每个 Tab 里选了什么";两者一起构成后续对话的结构化上下文,喂给 LLM(见
+        prompts.questionnaire_line),让 bot 顺着答案出方案、且绝不把答过的题再问一遍。
+
+        输入:tab = 哪个 Tab(odm/add-branding/help-me-choose/book-demo);answers = {题目id: 选项};
+              recommendation = 该 Tab 的推荐 dict(目前仅 help-me-choose 有),其它 Tab 传 None(不写入 recommendations)。
+        产出:把答案/推荐写进对应 Tab 的桶,并刷新活跃时间(算一次活动,防被 TTL 清掉)。
+        例:set_questionnaire("sess_x", "help-me-choose",
+                             {"usage":"...phone calls","where":"..."}, {"products":["Telalive"],...})
+            → answers={"help-me-choose":{...}}、recommendations={"help-me-choose":{...}}。
+        """
+        with self._lock:
+            s = self._data.get(sid)
+            if not s:
+                return
+            s["answers"][tab] = dict(answers or {})    # 覆盖【该 Tab 的桶】(单桶一次性提交,不累加);其它桶不动
+            if recommendation is not None:             # 有推荐(仅 Tab3)才写;其它 Tab 传 None → 不占桶
+                s["recommendations"][tab] = recommendation
+            s["last_seen"] = _now()
+            self._data.move_to_end(sid)                # 标记最近使用(LRU)
 
     def append_turn(self, sid, role, text):
         """

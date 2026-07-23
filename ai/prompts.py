@@ -61,20 +61,95 @@ def entry_intent_line(entry_intent):
     根据"入口意图"(用户进来时点的按钮)给 AI 一句英文上下文提示,让它顺着话题开场。
     这只是开场种子——之后聊到哪,模型看对话窗口和 lead.need,不受这句约束。
 
-    输入:entry_intent 字符串,取值 "odm"/"products"/"demo",或 None/其它(自由聊)。
-    输出:一句英文提示;认不出的 entry_intent(含 None)→ 返回空字符串 ""(不加任何提示)。
+    输入:entry_intent 字符串,取值为某个 Tab id(odm/add-branding/help-me-choose/book-demo)或
+          "voice-message";或 None/其它(自由聊)。传进来的通常是 entry_intents[0](主归因,见 llm._system)。
+    输出:一句英文提示;认不出的 entry_intent(含 None / voice-message)→ 返回空字符串 ""(不加任何提示)。
 
-    例:entry_intent="odm" → 返回 "The visitor came in via the ODM/OEM ... ask about product,
-        quantity, and timeline." → 这样 AI 一上来就问对问题,不会泛泛问 "what can I help you with"。
-    例:entry_intent=None(用户没点按钮、直接打字)→ 返回 "" → 系统提示里不放这一块。
+    这只是"开场行为种子"——具体选了哪些题/哪些型号由 questionnaire_line 详列;这里只给一句"该往哪个
+    方向接话"的行为提示(如 ODM 就主动问 产品/数量/周期),避免泛泛问 "what can I help you with"。
+
+    例:entry_intent="odm" → "...ask about product type, quantity, and timeline."
+    例:entry_intent=None(直接打字自由聊)→ 返回 "" → 系统提示里不放这一块。
     """
     labels = {
-        "odm": "The visitor came in via the ODM/OEM custom-manufacturing button. Assume they "
-               "want custom hardware; proactively ask about product, quantity, and timeline.",
-        "products": "The visitor is browsing products.",
-        "demo": "The visitor wants to book a demo/call.",
+        "odm": "The visitor came in via the ODM/OEM custom-build flow. Assume they want a fully "
+               "custom device; proactively ask about product type, quantity, and timeline.",
+        "add-branding": "The visitor came in via the 'Add your branding' (private-label) flow. Assume "
+                        "they want to brand an existing device; focus on which product, how deep the "
+                        "branding goes, and quantity.",
+        "help-me-choose": "The visitor came in via the 'Help me choose' selector — they're unsure which "
+                          "device fits. Land them on the right product, then naturally capture a contact.",
+        "book-demo": "The visitor wants to book a demo. Confirm what they'd like to see, then capture a "
+                     "contact and point them to the booking link.",
     }
-    return labels.get(entry_intent, "")   # dict.get 的默认值 "":entry_intent 不在表里(或为 None)就不加提示
+    return labels.get(entry_intent, "")   # 默认值 "":entry_intent 不在表里(None / voice-message / 其它)就不加提示
+
+
+def questionnaire_line(answers_by_tab, recommendations_by_tab):
+    """
+    把"用户在【各个】问卷 Tab 里选了什么 + (Tab3)我们据此算出的推荐"渲染成一段英文系统提示,
+    让 LLM 顺着答案出方案、并且【绝不把答过的题再问一遍】。
+
+    这是"问卷答案传给 GPT"的落点:答案按 Tab 分桶存在会话里(sessions.set_questionnaire),每轮由
+    llm._system() 调本函数把【所有做过的 Tab】一起拼进系统提示 → 所以用户连做多份问卷时,后续每一轮
+    对话 GPT 都能看到全部选择,不会重复问、也能综合出方案。
+
+    ── 输入(注意都是【按 Tab 分桶】的 dict,对应 sessions 里的新结构)──
+      answers_by_tab:         {tab: {题目id: 选项(字符串) 或 多选列表}};没做过任何问卷/为空 → 返回 ""(不加这块)。
+      recommendations_by_tab: {tab: 推荐dict};目前只有 help-me-choose 这个键(其它 Tab 不产生推荐)。
+                              推荐 dict 含 products/link/hint。可能为 None/空。
+    ── 输出 ──
+      一段英文提示(按 Tab 分段列选择,带上对应 Tab 的推荐);没有任何选择则返回 ""。
+
+    ── 推荐渲染 ──
+      products 非空 → 直接把这些型号 + hint 给模型,让它据此出方案(不给型号让 LLM 自由发挥会幻觉出不存在的型号)。
+      products 为空(兜底)→ 告诉模型没有明显对口的单品,引导看总览页 + 提出让真人帮选。
+      (注:哪些映射我们内部拿不太准、需要人工二次确认,由【我们自己记着】,不再作为字段喂给模型;
+       若某条想让 bot 主动说"让专家确认",把这层意思写进该规则的 hint 文案即可——hint 是自然语言,会自然带进回复。)
+
+    例:answers_by_tab={"help-me-choose":{"usage":"To answer phone calls",...}}、
+        recommendations_by_tab={"help-me-choose":{products:["Telalive","HA-TEL02"],hint:"call-answering ..."}}
+        → 输出大致:
+          "The visitor completed one or more guided questionnaires. Their selections:
+           [help-me-choose]
+           - usage: To answer phone calls
+           Based on this, recommend: Telalive, HA-TEL02 (call-answering ...).
+           Give a brief, tailored recommendation NOW ... do not ask these questions again ..."
+    """
+    if not answers_by_tab:
+        return ""   # 没做过任何问卷(自由聊/全跳过)→ 不加这一块
+
+    recommendations_by_tab = recommendations_by_tab or {}
+    body = []                                         # 各 Tab 的选择 + 推荐;为空则整块不加(见末尾判断)
+    for tab, answers in answers_by_tab.items():
+        if not answers:
+            continue                                  # 这个 Tab 的桶是空的(理论上不会,防御)→ 跳过
+        body.append(f"[{tab}]")                        # 分段标出是哪个 Tab 的选择(多份问卷时能区分)
+        for k, v in answers.items():
+            val = ", ".join(v) if isinstance(v, list) else v   # 多选题的值是列表 → 拼成一行
+            if val:
+                body.append(f"- {k}: {val}")
+
+        # (仅有推荐的 Tab,目前是 help-me-choose)把型号 + hint 给模型据此出方案。
+        # 有型号就直接推(型号来自确定性映射,不让 LLM 自己编);没型号(兜底)则引导看总览页 + 找真人帮选。
+        rec = recommendations_by_tab.get(tab)
+        if rec:
+            prods = ", ".join(rec.get("products") or [])
+            hint = rec.get("hint", "")
+            if prods:
+                body.append(f"Based on this, recommend: {prods} ({hint}).")
+            else:
+                body.append(f"No single device is an obvious fit ({hint}); point them to the full product "
+                            f"range and offer to help narrow it down.")
+
+    if not body:
+        return ""   # 所有桶都空 → 不加这一块
+
+    header = "The visitor completed one or more guided questionnaires. Their selections:"
+    # 收尾指令:立刻出方案 + 别重复问 + 自然引向索样和留联系方式(承接 PERSONA 目标 #2)
+    trailer = ("Give a brief, tailored recommendation NOW using these selections — do NOT ask these "
+               "questions again. Then naturally invite them to request a sample and share one contact method.")
+    return "\n".join([header] + body + [trailer])
 
 
 def faq_reference(faq):
