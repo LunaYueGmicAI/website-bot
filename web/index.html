@@ -42,8 +42,10 @@
   .msg.bot  { align-self: flex-start; background: var(--bubble-bot); color: var(--text); border-bottom-left-radius: 5px; }
   .msg.user { align-self: flex-end;   background: var(--bubble-user); color: var(--accent-ink); border-bottom-right-radius: 5px; }
   .msg a { color: inherit; text-decoration: underline; }
-  .learn-more { display: inline-block; margin-top: 6px; font-size: 12px; padding: 4px 10px; border-radius: 999px;
-    border: 1px solid var(--border); color: var(--accent); text-decoration: none; }
+  .learn-more { display: inline-block; margin-top: 6px; font-size: 12px; padding: 5px 12px; border-radius: 999px;
+    background: var(--bg); border: 1px solid var(--accent); color: var(--accent); text-decoration: none;
+    font-weight: 550; transition: .12s; }
+  .learn-more:hover { background: var(--accent); color: var(--accent-ink); }
   .qr-img { display: block; margin-top: 8px; width: 168px; max-width: 100%; border-radius: 10px; border: 1px solid var(--border); }
 
   .quick-col { display: flex; flex-direction: column; gap: 8px; align-self: stretch; margin: 2px 0 4px; }
@@ -164,7 +166,7 @@ function addBubble(role, text, opts = {}) {
   // 让方案文字 + 相关链接看起来是同一句话。先来一行 👇 指向下面的链接,每个链接前加 👉。
   if (Array.isArray(opts.pills) && opts.pills.some(p => p && p.url)) {
     el.appendChild(document.createElement("br"));
-    el.appendChild(document.createTextNode("👇"));
+    el.appendChild(document.createTextNode("🔍 Check more details"));   // 放大镜提示,后面不加小手指
     for (const p of opts.pills) { if (!p || !p.url) continue; const a = document.createElement("a"); a.className = "learn-more"; a.href = p.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = "👉 " + (p.label || "Open") + " →"; el.appendChild(document.createElement("br")); el.appendChild(a); }
   }
   if (opts.qr) { const img = document.createElement("img"); img.className = "qr-img"; img.src = opts.qr; img.alt = "WeChat QR"; el.appendChild(img); }
