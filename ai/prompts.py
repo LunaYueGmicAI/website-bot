@@ -31,6 +31,8 @@ whatever the visitor gives: the moment you have ANY one contact, treat contact a
 never insist on email and never ask for a second channel.
    If the need or a contact is still missing, ask for it naturally in context — never interrogate.
    NAME and company are NICE-TO-HAVE: record them if offered, but never push for them.
+   Whenever you ask for or accept a contact, reassure them that a REAL member of our team — \
+not a bot — will personally follow up with them shortly. Never imply the assistant itself does the follow-up.
 3. CONTACT ACCURACY — this is critical:
    - NEVER guess, repair, auto-correct, or complete a contact. Do NOT turn "(at)"/"at" into \
 "@" or "dot" into "."; do NOT invent a domain or missing digits.
@@ -43,7 +45,7 @@ confirm, e.g. "Just to confirm, your email is a@b.com — if that's wrong, just 
 Never claim you've noted a contact you are not sure is complete and correct.
    - Read a given contact back only ONCE. If the visitor then confirms it, or already tells you \
 it is correct / final / "100% sure", simply acknowledge it warmly and MOVE ON — e.g. "Perfect, \
-got it — we'll follow up at a@b.com." Do NOT ask them to confirm the same contact again. \
+got it — someone from our team will personally follow up at a@b.com shortly." Do NOT ask them to confirm the same contact again. \
 Repeating "just to confirm" after the visitor has confirmed is annoying: confirm once, then trust it.
 4. LANGUAGE: reply in the SAME language as the visitor's latest message. If the language \
 is unclear or the message is empty, default to English.
@@ -148,7 +150,11 @@ def questionnaire_line(answers_by_tab, recommendations_by_tab):
     header = "The visitor completed one or more guided questionnaires. Their selections:"
     # 收尾指令:立刻出方案 + 别重复问 + 自然引向索样和留联系方式(承接 PERSONA 目标 #2)
     trailer = ("Give a brief, tailored recommendation NOW using these selections — do NOT ask these "
-               "questions again. Then naturally invite them to request a sample and share one contact method.")
+               "questions again. Then FIRST invite them to tell you more about their specific "
+               "requirements so we can sharpen the recommendation. AFTER that, let them know that if "
+               "they'd like to take it further — a sample, a quote, or more details — they can leave "
+               "one contact method (email, phone, or a messaging app) and a REAL member of our team "
+               "will personally follow up shortly. Always make clear a real person, not a bot, reaches out.")
     return "\n".join([header] + body + [trailer])
 
 

@@ -160,6 +160,9 @@ function addBubble(role, text, opts = {}) {
   el.className = "msg " + role; el.textContent = text;
   if (opts.link) { const a = document.createElement("a"); a.className = "learn-more"; a.href = opts.link; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Learn more →"; el.appendChild(document.createElement("br")); el.appendChild(a); }
   if (opts.action && opts.action.url) { const a = document.createElement("a"); a.className = "learn-more"; a.href = opts.action.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = opts.action.label || "Open →"; el.appendChild(document.createElement("br")); el.appendChild(a); }
+  // opts.pills:一组"了解更多"链接药丸,直接挂在【本条气泡】里(不再单开一条 "Here's more on that" 气泡),
+  // 让方案文字 + 相关链接看起来是同一句话,避免 bot 连吐好几个框显得自言自语。
+  if (Array.isArray(opts.pills)) { for (const p of opts.pills) { if (!p || !p.url) continue; const a = document.createElement("a"); a.className = "learn-more"; a.href = p.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = (p.label || "Open") + " →"; el.appendChild(document.createElement("br")); el.appendChild(a); } }
   if (opts.qr) { const img = document.createElement("img"); img.className = "qr-img"; img.src = opts.qr; img.alt = "WeChat QR"; el.appendChild(img); }
   messagesEl.appendChild(el); scrollDown();
   return el;
@@ -381,7 +384,7 @@ async function submitQuestionnaire() {
   setBusy(true); const stop = showTyping();
   try {
     const r = await postJSON("/questionnaire", payload);
-    stop(); await addBotReply(r.reply || "…"); renderLinks(r.links); renderThrowbacks(r.contacts);
+    stop(); await addBotReply(r.reply || "…", { pills: r.links }); renderThrowbacks(r.contacts);
   } catch (e) { stop(); addBubble("bot", "Sorry, something went wrong — please try again."); }
   setBusy(false);
 }
@@ -393,18 +396,6 @@ function skipQuestionnaire() {
   addBubble("bot", "No problem — tell me what you're looking for, or ask me anything.");
 }
 
-function renderLinks(links) {
-  // /questionnaire 返回的链接渲染成一条 bot 气泡里的若干药丸;标签本身已是描述性短语(如 "See HA-SPK01")。
-  const arr = (links || []).filter(l => l && l.url);
-  if (!arr.length) return;
-  const el = document.createElement("div"); el.className = "msg bot"; el.textContent = "Here's more on that 👇";
-  for (const l of arr) {
-    const a = document.createElement("a"); a.className = "learn-more"; a.href = l.url; a.target = "_blank";
-    a.rel = "noopener"; a.textContent = (l.label || "Open") + " →";
-    el.appendChild(document.createElement("br")); el.appendChild(a);
-  }
-  messagesEl.appendChild(el); scrollDown();
-}
 
 async function sendText() {
   const text = textEl.value.trim();

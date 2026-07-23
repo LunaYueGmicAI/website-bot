@@ -33,8 +33,8 @@ MAX_AUDIO_BYTES = int(os.getenv("MAX_AUDIO_BYTES", str(8_000_000)))
 # 大模型挂了(quota 耗尽/key 失效/超时)时给用户的兜底回复。默认英文(见多语言策略)。
 # 为什么要兜底:见记忆 openai-key-pool-emergency——6-29 全线 key 耗尽过。没兜底的话
 # LLM 一抛异常整个 /chat 就 500,用户"发了没反应",线索也断在半路。
-LLM_FALLBACK_REPLY = ("Thanks for reaching out! Our team will follow up shortly — "
-                      "please leave your email or phone so we can get back to you.")
+LLM_FALLBACK_REPLY = ("Thanks for reaching out! Leave your email or phone and a real member of "
+                      "our team will personally get back to you shortly.")
 
 
 # ======================== 请求体模型(Pydantic 自动校验) ========================

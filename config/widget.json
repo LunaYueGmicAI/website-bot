@@ -1,5 +1,5 @@
 {
-  "greeting": "We design and build custom AI voice hardware — end to end. As the AI hardware arm of Gainstrong (a manufacturer since 2009), we take you from concept to mass production: wearable recorders, smart badges, speakers, headsets, call-answering devices and more. What brings you here? 👇",
+  "greeting": "We design and build custom AI voice hardware end to end. A North America team backed by our own China factory, building voice hardware since 2009, we take you from concept to mass production: wearable recorders, call-answering devices, speakers, headsets, smart glasses & pens, and dev kits. Where would you like to start? 👇",
   "quickActions": [
     {
       "id": "odm",
@@ -34,7 +34,7 @@
   "questionnaires": {
     "odm": {
       "intro": "Full custom builds — your own device from the ground up: industrial design, PCB, acoustics, firmware and mass production. We've shipped custom voice hardware for healthcare, field service and consumer brands.",
-      "cta": "Answer 3 quick questions and we'll outline how we'd build it →",
+      "cta": "Plan my build →",
       "questions": [
         {
           "id": "product",
@@ -80,7 +80,7 @@
 
     "add-branding": {
       "intro": "Take one of our proven devices and make it yours — your logo, colors, packaging, even firmware tweaks. Faster and lower-cost than a full custom build. (a.k.a. private label / OEM)",
-      "cta": "Answer 3 quick questions and we'll tailor it →",
+      "cta": "Brand my device →",
       "questions": [
         {
           "id": "product",
@@ -304,7 +304,7 @@
     },
     {
       "q": "How do I get in touch / request a quote?",
-      "a": "The fastest way is to leave your email here with a short note on what you need — our ODM team will follow up with details and a quote. You can also reach us directly via WhatsApp, email (trigg@gmic.ai), or book a call using the buttons above.",
+      "a": "The fastest way is to leave your email here with a short note on what you need — a real member of our ODM team will personally follow up with details and a quote. You can also reach us directly via WhatsApp, email (trigg@gmic.ai), or book a call using the buttons above.",
       "link": "https://gmic.ai/contact-gmic-ai/"
     }
   ]
