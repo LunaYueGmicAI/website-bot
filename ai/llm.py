@@ -98,7 +98,7 @@ def _client_lazy():
     return _client
 
 
-def _system(session, faq):
+def _system(session, faq, product_ref=""):
     """
     拼这一轮的"系统提示"。顺序:人设 → 入口意图 → FAQ 口径 → 已知线索 → 输出契约。
     这几块合起来,就是"只带精华、不带全部历史"里的"精华"。
@@ -130,6 +130,11 @@ def _system(session, faq):
     ql = prompts.questionnaire_line(session.get("answers"), session.get("recommendations"))
     if ql:
         blocks.append(ql)
+    # 产品知识块:官网核实过的型号目录,让模型自由聊时也能用真实型号/规格作答(见 prompts.product_reference)。
+    # 放在 FAQ 之前:先给"有哪些真实产品",再给"标准口径"。空则不放。
+    pr = prompts.product_reference(product_ref)
+    if pr:
+        blocks.append(pr)
     fr = prompts.faq_reference(faq)
     if fr:                                     # 一条 FAQ 都没填好 → fr 为空 → 这块不放
         blocks.append(fr)
@@ -138,7 +143,7 @@ def _system(session, faq):
     return "\n\n".join(blocks)                 # 各块之间空一行,读起来清楚
 
 
-async def respond(session, faq, window):
+async def respond(session, faq, window, product_ref=""):
     """
     跑一轮对话(异步):把上下文喂给模型,一次拿回【回复文本】+【抽取到的线索】。
 
@@ -172,7 +177,7 @@ async def respond(session, faq, window):
       (之后调用方把 lead 交给 sessions.update_lead 回填,并重算 missing。)
     """
     # 步骤1:system 放最前,再按顺序接上最近 N 轮对话
-    messages = [{"role": "system", "content": _system(session, faq)}]
+    messages = [{"role": "system", "content": _system(session, faq, product_ref)}]
     for t in window:
         role = "assistant" if t["role"] == "assistant" else "user"   # 只认这两种角色,其余一律当 user
         messages.append({"role": role, "content": t["text"]})

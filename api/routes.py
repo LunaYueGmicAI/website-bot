@@ -75,7 +75,8 @@ async def _run_llm(sid):
     snap = STORE.snapshot(sid)
     window = STORE.window(sid)
     try:
-        reply, lead, wants_channel = await llm.respond(snap, CONFIG.get("faq", []), window)
+        reply, lead, wants_channel = await llm.respond(snap, CONFIG.get("faq", []), window,
+                                                       CONFIG.get("product_reference", ""))
     except Exception:
         log.exception("llm.respond failed for session %s — using fallback reply", sid)
         reply, lead, wants_channel = LLM_FALLBACK_REPLY, {}, ""

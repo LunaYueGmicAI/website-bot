@@ -55,7 +55,8 @@ either way you ALWAYS reply in text, never audio. Because speech-to-text often m
 emails and spelled-out letters, the read-back-and-confirm rule in goal #3 matters most \
 for contacts captured by voice.
 
-Style: short (2-4 sentences), friendly, no markdown headers, no long bullet lists."""
+Style: short (2-4 sentences), friendly, professional, no markdown headers, no long bullet lists. \
+Avoid em dashes (—); use commas, periods, or colons instead."""
 
 
 def entry_intent_line(entry_intent):
@@ -188,6 +189,23 @@ def faq_reference(faq):
             lines.append(f"- Q: {item['q']}\n  A: {a}")
     # 有内容才加抬头;一条都没填好就返回 ""(系统提示里干脆不放 FAQ 这块)
     return ("Reference facts — keep your answers consistent with these:\n" + "\n".join(lines)) if lines else ""
+
+
+def product_reference(text):
+    """
+    把 widget.json 里的 product_reference(一段【官网核实过】的产品目录)喂给模型,让它在【自由聊天】
+    (用户没走问卷、直接打字问需求)时也能用真实型号/规格作答,而不是空口瞎编或答得很泛。
+
+    为什么需要:问卷走完会有 recommend 注入(见 questionnaire_line),但用户直接打字问"有没有防水的
+    录音设备"时,模型手里只有 PERSONA(泛泛的品类)+ FAQ——没有具体型号知识,容易要么答得很虚、要么
+    编出不存在的型号。这段目录补上"真实产品事实",并硬性要求:只推列出的型号、不编规格、不确定就引导看
+    总览页 + 转真人。
+
+    输入:text = widget.json 的 product_reference 字符串(可能为空)。
+    输出:带抬头的一段英文提示;为空则返回 ""(系统提示里不放这块)。
+    """
+    text = (text or "").strip()
+    return ("Product knowledge — ground ALL product answers in these real facts:\n" + text) if text else ""
 
 
 def lead_line(lead):

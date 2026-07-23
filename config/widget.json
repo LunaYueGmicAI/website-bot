@@ -1,5 +1,5 @@
 {
-  "greeting": "We design and build custom AI voice hardware end to end. A North America team backed by our own China factory, building voice hardware since 2009, we take you from concept to mass production: wearable recorders, call-answering devices, speakers, headsets, smart glasses & pens, and dev kits.\nWhere would you like to start? 👇",
+  "greeting": "We design and build **custom AI voice hardware**, end to end. A North America team backed by our own China factory, building voice hardware **since 2009**, we take you **from concept to mass production**: wearable recorders, call-answering devices, speakers, headsets, smart glasses & pens, and dev kits.\nWhere would you like to start? 👇",
   "quickActions": [
     {
       "id": "odm",
@@ -33,7 +33,7 @@
 
   "questionnaires": {
     "odm": {
-      "intro": "Full custom builds — your own device from the ground up: industrial design, PCB, acoustics, firmware and mass production. We've shipped custom voice hardware for healthcare, field service and consumer brands.",
+      "intro": "Full custom builds: your own device from the ground up, covering industrial design, PCB, acoustics, firmware and mass production. We've built voice hardware for healthcare, field service and consumer brands.",
       "cta": "Plan my build →",
       "questions": [
         {
@@ -79,7 +79,7 @@
     },
 
     "add-branding": {
-      "intro": "Take one of our proven devices and make it yours — your logo, colors, packaging, even firmware tweaks. Faster and lower-cost than a full custom build. (a.k.a. private label / OEM)",
+      "intro": "Take one of our proven devices and make it yours: your logo, colors, packaging, even firmware tweaks. Faster and lower cost than a full custom build. (Also known as private label / OEM.)",
       "cta": "Brand my device →",
       "questions": [
         {
@@ -123,7 +123,7 @@
     },
 
     "help-me-choose": {
-      "intro": "Not sure which device fits? Answer 3 quick questions and we'll point you to the right one — and you can grab a sample.",
+      "intro": "Not sure which device fits? Answer 3 quick questions and we'll point you to the right one, then help you request a sample.",
       "cta": "Find my device →",
       "questions": [
         {
@@ -238,7 +238,7 @@
       "when": { "usage": "Worn hands-free (badge, clip, lanyard)", "where": "Clinic / healthcare" },
       "products": ["HA-MIC06A", "HA-MIC05"],
       "link": "https://gmic.ai/mic05-secure-ai-voice-recorder/",
-      "hint": "clinical-grade secure wearable recorder; MIC06A slide-touch, MIC05 hardware noise reduction + NFC security"
+      "hint": "clinical-grade secure wearable recorders; both NFC-encrypted with on-device (1GB) storage, MIC05 adds hardware noise reduction"
     },
     {
       "when": { "usage": "Worn hands-free (badge, clip, lanyard)", "musthave": "Security / encryption" },
@@ -273,6 +273,8 @@
 
   "moq_note": "Custom / private-label projects typically start around 2,000 units, though it depends on the build.",
 
+  "product_reference": "Our real product lines (recommend ONLY from these; never invent model names or specs, never state a spec that isn't listed here). Wearable recorders (HA-MIC06B/06A/05/04): MIC05 and MIC06A are secure clinical-grade recorders with NFC-encrypted access, on-device storage (1GB), and MIC05 adds hardware noise reduction. Call-answering (Phone Entry): Telalive turns a desk phone into a 24/7 AI receptionist; HA-TEL02 is a 4G handheld assistant. Speakers: HA-SPK01 (IPX7 waterproof mini), HA-SPK03 (IPX5). Headsets: HA-BC01 (bone-conduction, IPX6, rugged for outdoor use), plus OWS/TWS earbuds. Field push-to-talk device: HA-MIC01. Smart devices: HA-GLS01 glasses, HA-PEN01 pen, translator and toy devices. Dev & modules: an ESP32 kit for embedding our voice AI into your own product. If nothing clearly fits, point them to gmic.ai/products and offer to connect a specialist; never guess a spec you are unsure of.",
+
   "contacts": [
     { "id": "whatsapp", "label": "WhatsApp", "icon": "💬", "url": "https://api.whatsapp.com/send/?phone=16699000008", "value": "+1 (669) 900-0008", "open_label": "Open WhatsApp" },
     { "id": "wechat",   "label": "WeChat",   "icon": "🟢", "type": "qr", "qr": "https://gmic.ai/wp-content/uploads/gmic-site/main/img/wechat-qr.png", "value": "Scan to add us on WeChat" },
@@ -284,17 +286,17 @@
   "faq": [
     {
       "q": "What do you do?",
-      "a": "GMIC AI designs and manufactures custom AI voice hardware — AI voice recorders, wearable microphones, smart badges, AI scribe devices, and Bluetooth/Wi-Fi audio products. We take it end to end, from design and firmware to mass production. Tell us what you have in mind and we'll see how we can help.",
+      "a": "GMIC AI designs and manufactures custom AI voice hardware: AI voice recorders, wearable microphones, smart badges, AI scribe devices, and Bluetooth/Wi-Fi audio products. We take it end to end, from design and firmware to mass production. Tell us what you have in mind and we'll see how we can help.",
       "link": "https://gmic.ai/about-gmic-ai/"
     },
     {
       "q": "Do you offer custom / white-label (ODM/OEM)? What is the MOQ?",
-      "a": "Yes — full ODM/OEM is our core: custom enclosure, firmware, tuning, and mass production, all under your brand. Custom / private-label projects typically start around 2,000 units, though it depends on the build. Tell us what you're building and your target quantity, and we'll give you an exact figure.",
+      "a": "Yes. Full ODM/OEM is our core: custom enclosure, firmware, tuning, and mass production, all under your brand. Custom / private-label projects typically start around 2,000 units, though it depends on the build. Tell us what you're building and your target quantity, and we'll give you an exact figure.",
       "link": "https://gmic.ai/ai-hardware-odm-oem/"
     },
     {
       "q": "Which industries / use cases do you support?",
-      "a": "We support voice capture across healthcare and clinical scribing, field service, sales and meetings, education, and enterprise/security — essentially anywhere speech needs to become text or action. If you have a specific use case, describe it and we'll tell you how we'd approach it.",
+      "a": "We support voice capture across healthcare and clinical scribing, field service, sales and meetings, public safety, logistics, and enterprise, essentially anywhere speech needs to become text or action. If you have a specific use case, describe it and we'll tell you how we'd approach it.",
       "link": "https://gmic.ai/products/"
     },
     {
@@ -304,7 +306,7 @@
     },
     {
       "q": "How do I get in touch / request a quote?",
-      "a": "The fastest way is to leave your email here with a short note on what you need — a real member of our ODM team will personally follow up with details and a quote. You can also reach us directly via WhatsApp, email (trigg@gmic.ai), or book a call using the buttons above.",
+      "a": "The fastest way is to leave your email here with a short note on what you need, and a real member of our ODM team will personally follow up with details and a quote. You can also reach us directly on our WhatsApp, email (trigg@gmic.ai), or book a call using the buttons above.",
       "link": "https://gmic.ai/contact-gmic-ai/"
     }
   ]

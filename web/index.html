@@ -157,6 +157,9 @@ if (!sessionId) {
 }
 let CONFIG = null, busy = false;
 let qState = null;   // 问卷进行中的状态 {tab, questions, idx, answers, panel, def};不在问卷中 = null
+// 问卷总结气泡里,每个题目标签前的小图标(按 widget.json 各题的 label 映射;没匹配到就不加)。
+const LABEL_EMOJI = { "Product": "📦", "Use case": "🎯", "Quantity": "🔢", "Branding": "🎨",
+  "Usage": "🤚", "Environment": "📍", "Must-haves": "✅", "Interest": "👀", "Region": "🌍", "Contact": "📇" };
 
 async function postJSON(path, body) {
   const res = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -165,9 +168,17 @@ async function postJSON(path, body) {
 }
 function scrollDown() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 
+// 轻量富文本:先转义 HTML(防注入,气泡里有用户/LLM 文本),再把 **粗体** 变 <strong>、\n 变 <br>。
+// 只支持这两种,故意不做完整 markdown(够用且安全)。
+function setRich(el, text) {
+  const esc = String(text == null ? "" : text)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  el.innerHTML = esc.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>");
+}
+
 function addBubble(role, text, opts = {}) {
   const el = document.createElement("div");
-  el.className = "msg " + role; el.textContent = text;
+  el.className = "msg " + role; setRich(el, text);
   if (opts.link) { const a = document.createElement("a"); a.className = "learn-more"; a.href = opts.link; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Learn more →"; el.appendChild(document.createElement("br")); el.appendChild(a); }
   if (opts.action && opts.action.url) { const a = document.createElement("a"); a.className = "learn-more"; a.href = opts.action.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = opts.action.label || "Open →"; el.appendChild(document.createElement("br")); el.appendChild(a); }
   // opts.pills:一组"了解更多"链接药丸,直接挂在【本条气泡】里(紧跟第一句话,不单开一条 "Here's more" 气泡),
@@ -276,13 +287,15 @@ function renderContacts() {
   $("contacts").hidden = false;
 }
 function onContactClick(c) {
-  if (c.type === "qr") addBubble("bot", c.value || "Scan to add us on WeChat:", { qr: c.qr });
-  else addBubble("bot", `${c.label}: ${c.value || ""}`, { action: { url: c.url, label: c.open_label } });
+  // ⭐ 点名这是【我们公司】的联系方式(直接甩个值会让人疑惑这是谁的)。
+  if (c.type === "qr") addBubble("bot", `Our WeChat 👇 ${c.value || "scan to add us"}`, { qr: c.qr });
+  else addBubble("bot", `Our ${c.label} is: **${c.value || ""}**`, { action: { url: c.url, label: c.open_label } });
 }
 function renderThrowbacks(list) {
   for (const c of list || []) {
-    if (c.type === "qr") addBubble("bot", `Prefer ${c.label}? ${c.value || "Scan to add us."}`, { qr: c.qr });
-    else addBubble("bot", `Prefer ${c.label}? You can reach us directly here 👇`, { action: { url: c.url, label: c.open_label } });
+    // 同理点名"我们的",避免"这是谁的号"的疑惑。
+    if (c.type === "qr") addBubble("bot", `Prefer ${c.label}? Our WeChat 👇 ${c.value || "scan to add us"}`, { qr: c.qr });
+    else addBubble("bot", `Prefer ${c.label}? Our ${c.label} is: **${c.value || ""}** 👇`, { action: { url: c.url, label: c.open_label } });
   }
 }
 
@@ -393,7 +406,8 @@ async function submitQuestionnaire() {
   const { tab, questions, answers, panel } = qState;
   const picked = questions.filter(q => answers[q.id] != null).map(q => {
     const v = answers[q.id]; const val = Array.isArray(v) ? v.join(", ") : v;
-    return `${q.label || q.q}: ${val}`;                  // 例:"Usage: On a desk / in a room"
+    const em = LABEL_EMOJI[q.label] || "";               // 标签前的小图标(按 label 映射,见顶部常量)
+    return `${em ? em + " " : ""}**${q.label || q.q}:** ${val}`;   // 例:"📦 **Product:** Recorder"(标签加粗)
   });
   panel.remove();
   addBubble("user", picked.length ? picked.join("\n") : "(skipped the questions)");
@@ -436,12 +450,8 @@ sendBtn.addEventListener("click", sendText);
 (async function init() {
   try { CONFIG = await (await fetch(API + "/config")).json(); }
   catch (e) { CONFIG = { greeting: "Hi 👋 How can we help?", quickActions: [], faq: [], contacts: [] }; }
-  // 欢迎语:支持 \n 换行(把结尾的 "Where would you like to start? 👇" 单独放一行)
-  (function () {
-    const g = CONFIG.greeting || "Hi 👋 How can we help?";
-    const el = addBubble("bot", "");
-    g.split("\n").forEach((ln, i) => { if (i) el.appendChild(document.createElement("br")); el.appendChild(document.createTextNode(ln)); });
-  })();
+  // 欢迎语:setRich 已支持 \n 换行 + **加粗**,直接一条气泡即可。
+  addBubble("bot", CONFIG.greeting || "Hi 👋 How can we help?");
   renderQuickColumn(); renderContacts();
 })();
 </script>
