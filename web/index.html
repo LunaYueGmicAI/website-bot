@@ -168,12 +168,16 @@ async function postJSON(path, body) {
 }
 function scrollDown() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 
-// 轻量富文本:先转义 HTML(防注入,气泡里有用户/LLM 文本),再把 **粗体** 变 <strong>、\n 变 <br>。
-// 只支持这两种,故意不做完整 markdown(够用且安全)。
+// 轻量富文本:先转义 HTML(防注入,气泡里有用户/LLM 文本),再把 **粗体** 变 <strong>、
+// 把裸 http(s) 链接变成可点的 <a>(AI 聊天里引用官网链接时可直接点)、\n 变 <br>。
+// 故意只做这几种,不做完整 markdown(够用且安全)。
 function setRich(el, text) {
-  const esc = String(text == null ? "" : text)
+  let s = String(text == null ? "" : text)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  el.innerHTML = esc.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>");
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  // 自动链接:结尾的标点(。,)!?、闭括号)不并入 URL。转义后 URL 里不会有 < & 了。
+  s = s.replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  el.innerHTML = s.replace(/\n/g, "<br>");
 }
 
 function addBubble(role, text, opts = {}) {

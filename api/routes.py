@@ -368,20 +368,33 @@ def _questionnaire_links(tab, q, recommendation):
       - odm / add-branding → 该 Tab 配好的相关服务页链接(questionnaire.links)。
     产出:[{"label":..,"url":..}, ...],没有就 []。
     """
+    extra = q.get("links", [])   # Tab 级补充链接(知识库/佐证页,widget.json 里配)
+    out = []
     if tab == "book-demo":
         rl = q.get("result_link")
-        return [rl] if rl else []
-    if tab == "help-me-choose":
+        if rl:
+            out.append(rl)
+        out += extra
+    elif tab == "help-me-choose":
         # 用推荐的型号名当链接标签(比泛泛的 "View details" 明确得多):
         #   有型号 → "See HA-SPK01"(前端会自动补 " →");没型号(兜底)→ "Browse our products"。
         rec = recommendation or {}
         link = rec.get("link")
-        if not link:
-            return []
-        prods = rec.get("products") or []
-        label = "See " + ", ".join(prods) if prods else "Browse our products"
-        return [{"label": label, "url": link}]
-    return q.get("links", [])   # odm / add-branding:直接用问卷里配好的链接(标签本就有描述性)
+        if link:
+            prods = rec.get("products") or []
+            label = "See " + ", ".join(prods) if prods else "Browse our products"
+            out.append({"label": label, "url": link})
+        out += extra
+    else:
+        out = extra   # odm / add-branding:直接用问卷里配好的链接(标签本就有描述性)
+    # 按 URL 去重(推荐链接可能与某条 Tab 链接指向同一页),保序。
+    seen, deduped = set(), []
+    for l in out:
+        u = (l or {}).get("url")
+        if u and u not in seen:
+            seen.add(u)
+            deduped.append(l)
+    return deduped
 
 
 @router.post("/questionnaire")

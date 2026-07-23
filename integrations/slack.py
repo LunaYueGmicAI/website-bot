@@ -143,6 +143,31 @@ def _enqueue(job, desc):
 
 
 # ======================== 卡片渲染 ========================
+def _questionnaire_lines(session):
+    """
+    把会话里存的问卷答案(按 Tab 分桶 {tab:{题id:值}})渲染成卡片上的"问卷"明细段,逐题列出。
+    题目标签(Product/Usage…)从 widget.json 的问卷定义按题 id 反查(拿 label,退而取 q 全文)。
+    没做过任何问卷 → 返回 [](卡片就不出现这段)。
+    例:answers={"help-me-choose":{"usage":"To answer phone calls","where":"Office / meetings"}}
+        → ["• 问卷:", "  〔help-me-choose〕", "   • Usage: To answer phone calls", "   • Environment: Office / meetings"]
+    """
+    answers_by_tab = session.get("answers") or {}
+    if not answers_by_tab:
+        return []
+    from core.widget_config import QUESTIONNAIRES     # 局部导入:拿题 id→label 映射(避免顶层 import 顺序问题)
+    lines = ["• 问卷:"]
+    for tab, ans in answers_by_tab.items():
+        if not ans:
+            continue
+        qdef = QUESTIONNAIRES.get(tab, {})
+        label_by_id = {q["id"]: (q.get("label") or q.get("q") or q["id"]) for q in qdef.get("questions", [])}
+        lines.append(f"  〔{tab}〕")
+        for qid, val in ans.items():
+            v = ", ".join(val) if isinstance(val, list) else val     # 多选题值是列表 → 逗号拼
+            lines.append(f"   • {label_by_id.get(qid, qid)}: {v}")
+    return lines
+
+
 def _card_text(session):
     """
     把会话渲染成"线索卡"文本。每次 lead/entry_intents 变了,就用这个重新生成、覆盖那张卡。
@@ -193,8 +218,9 @@ def _card_text(session):
         f"• 即时通讯: {'✅ ' + ', '.join(messengers) if messengers else '—'}",
         f"• 称呼: {lead.get('name') or '—'}",
         f"• 需求: {lead.get('need') or '—'}",
-        f"• 来源: {session.get('meta', {}).get('page_url') or '—'}",
     ]
+    parts += _questionnaire_lines(session)   # 问卷逐题答案(做过才加;每个 Tab 一段)
+    parts.append(f"• 来源: {session.get('meta', {}).get('page_url') or '—'}")
     if lead.get("missing"):
         # missing 是内部键(contact/need)→ 映射成中文展示;未知键原样。
         _MISS_ZH = {"contact": "联系方式", "need": "需求"}
