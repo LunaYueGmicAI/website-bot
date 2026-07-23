@@ -227,7 +227,8 @@ function renderQuickColumn() {
   messagesEl.appendChild(col); scrollDown();
 }
 async function onQuickAction(a) {
-  if (busy || qState) return;                       // 问卷进行中不接受别的快捷动作
+  if (busy) return;                                 // 有网络请求在飞时不打断(问卷提交/聊天回复中)
+  if (qState) teardownQuestionnaire();              // 正在做另一个还没提交的问卷 → 放弃它,允许切到新动作
   if (a.type === "questionnaire") { startQuestionnaire(a); return; }
   if (a.type === "link") {
     if (a.url && !a.url.startsWith("TODO")) window.open(a.url, "_blank", "noopener");
@@ -404,10 +405,14 @@ async function submitQuestionnaire() {
   setBusy(false);
 }
 
-function skipQuestionnaire() {
-  // intro 处点 Skip:撤掉向导卡,直接进自由聊。
+function teardownQuestionnaire() {
+  // 撤掉当前向导卡 + 复位问卷状态 + 解锁输入(不提示、不发消息)。切换问卷/放弃时共用。
   if (qState && qState.panel) qState.panel.remove();
   qState = null; lockInput(false);
+}
+function skipQuestionnaire() {
+  // intro 处点 Skip:撤掉向导卡,直接进自由聊。
+  teardownQuestionnaire();
   addBubble("bot", "No problem — tell me what you're looking for, or ask me anything.");
 }
 
