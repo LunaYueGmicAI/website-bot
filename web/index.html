@@ -205,21 +205,13 @@ function showTyping() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// 把一段较长的 bot 回复拆成 2-3 句一条的短气泡(现代 chat UI 惯例:短气泡比一大坨易读)。
-// 策略保守:先按换行分段;某段仍过长(>180 字符)才从中点最近的句末切一刀,避免误伤缩写/型号里的点号。
+// 把 bot 回复拆成气泡:只在【空行(连续换行)】处分段——每个自然段一条气泡;段内的单个换行
+// 收成空格,让句子连成一段。故意【不再】按句号/按长度硬拆,避免一条回复碎成一堆气泡
+// (以前 >180 字符就从中间切,会把"推荐 + 补充说明"拆成两条,链接还插在中间)。
 function splitReply(text) {
   const t = (text || "").trim();
-  const paras = t.split(/\n+/).map((s) => s.trim()).filter(Boolean);
-  const out = [];
-  for (const p of paras) {
-    if (p.length <= 180) { out.push(p); continue; }
-    const mid = Math.floor(p.length / 2);
-    let cut = -1; const re = /[.!?。!?](\s|$)/g; let m;
-    while ((m = re.exec(p))) { if (cut < 0 || Math.abs(m.index - mid) < Math.abs(cut - mid)) cut = m.index + 1; }
-    if (cut > 0 && cut < p.length) { out.push(p.slice(0, cut).trim()); out.push(p.slice(cut).trim()); }
-    else out.push(p);
-  }
-  return out.length ? out : [t];
+  const paras = t.split(/\n\s*\n+/).map((s) => s.replace(/\s*\n\s*/g, " ").trim()).filter(Boolean);
+  return paras.length ? paras : [t];
 }
 
 // 逐条吐出短气泡(条间留一点停顿,像真人打字);opts(如 link)只挂到最后一条。
