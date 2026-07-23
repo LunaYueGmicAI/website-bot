@@ -25,10 +25,11 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: transparent; color: var(--text); }
+  body { display: flex; align-items: center; justify-content: center; }   /* 大屏上让 widget 垂直居中(高度被下面 max-height 限住时) */
 
   #app {
     display: flex; flex-direction: column;
-    height: 100vh; max-width: 440px; margin: 0 auto;
+    height: 100vh; max-height: 640px; max-width: 440px; margin: auto;   /* 桌面大屏封顶 640px→像正常浮动聊天窗;窗口/iframe 比 640 矮时按实际高(=100vh) */
     background: var(--bg); border: 1px solid var(--border); border-radius: 18px;
     box-shadow: 0 10px 40px rgba(20, 22, 30, .12); overflow: hidden;
   }
