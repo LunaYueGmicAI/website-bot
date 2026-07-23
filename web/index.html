@@ -38,6 +38,9 @@
 
   #messages { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 10px;
     scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }   /* Firefox:细滚动条常显 */
+  /* ⭐ 关键:#messages 是定高滚动容器,子元素默认 flex-shrink:1 会被挤压(高问卷卡带 overflow:hidden→被压扁裁掉内容,
+     表现为"只剩一条横线")。强制子元素不收缩→保持自然高度,超出由 #messages 滚动。*/
+  #messages > * { flex-shrink: 0; }
   /* Chrome/Safari:强制显示滚动条(默认悬浮式会自动隐藏,让人误以为不能滚) */
   #messages::-webkit-scrollbar { width: 10px; }
   #messages::-webkit-scrollbar-track { background: transparent; }
