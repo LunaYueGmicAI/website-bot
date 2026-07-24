@@ -98,12 +98,12 @@
         {
           "id": "depth",
           "label": "Branding",
-          "q": "How far should the branding go?",
+          "q": "What would you like to customize? (pick any)",
+          "multi": true,
           "options": [
-            "Logo only",
-            "Logo + colors & packaging",
-            "+ Firmware / UI tweaks (boot brand, LED, prompts)",
-            "Full works"
+            "Logo",
+            "Colors & packaging",
+            "Firmware / UI (boot screen, LED, voice prompts)"
           ]
         },
         {
@@ -280,6 +280,8 @@
   },
 
   "moq_note": "Custom / private-label projects typically start around 2,000 units, though it depends on the build.",
+
+  "questionnaire_followup": "Want to fine-tune this? Tell me any specific requirements. And whenever you're ready, just leave a contact (email, phone, or a messaging app) and a real member of our team will personally follow up with you shortly.",
 
   "product_reference": "Our real product lines (recommend ONLY from these; never invent model names or specs, never state a spec that isn't listed here). Wearable recorders (HA-MIC06B/06A/05/04): MIC05 and MIC06A are secure clinical-grade recorders with NFC-encrypted access, on-device storage (1GB), and MIC05 adds hardware noise reduction. Call-answering (Phone Entry): Telalive turns a desk phone into a 24/7 AI receptionist; HA-TEL02 is a 4G handheld assistant. Speakers: HA-SPK01 (IPX7 waterproof mini), HA-SPK03 (IPX5). Headsets: HA-BC01 (bone-conduction, IPX6, rugged for outdoor use), plus OWS/TWS earbuds. Field push-to-talk device: HA-MIC01. Smart devices: HA-GLS01 glasses, HA-PEN01 pen, translator and toy devices. Dev & modules: an ESP32 kit for embedding our voice AI into your own product. If nothing clearly fits, point them to gmic.ai/products and offer to connect a specialist; never guess a spec you are unsure of. Official pages you MAY share when relevant (paste the EXACT URL, never invent a link): Products https://gmic.ai/products/ | ODM/OEM custom builds https://gmic.ai/ai-hardware-odm-oem/ | Private-label / branding https://gmic.ai/private-label-voice-ai-hardware/ | Custom enclosure design https://gmic.ai/custom-hardware-enclosure-design/ | Case studies https://gmic.ai/ai-hardware-case-studies/ | Telalive call-answering https://gmic.ai/telalive/ | MIC05 secure recorder https://gmic.ai/mic05-secure-ai-voice-recorder/ | MIC01 push-to-talk https://gmic.ai/mic01-push-to-talk-ai-voice-device/ | About us https://gmic.ai/about-gmic-ai/ | Contact / get a quote https://gmic.ai/contact-gmic-ai/.",
 

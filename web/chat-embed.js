@@ -36,9 +36,10 @@
     '<circle cx="14" cy="12.6" r="1.05" fill="currentColor" stroke="none"/>' +
     '<path d="M10.2 15.4q1.8 1.2 3.6 0"/></svg>';
 
-  var X_SVG =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
-    'stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  // 最小化图标(向下收起的箭头)——点它把面板收回气泡,对话不丢,方便暂时看网站。
+  var MIN_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
 
   // 宿主锚点 + Shadow DOM(样式与宿主页彻底隔离)
   var host = document.createElement("div");
@@ -91,7 +92,7 @@
   launch.type = "button";
   launch.className = "launch";
   launch.setAttribute("aria-label", "Chat with us");
-  launch.innerHTML = '<span class="bot">' + BOT_SVG + '</span><span class="x">' + X_SVG + '</span>';
+  launch.innerHTML = '<span class="bot">' + BOT_SVG + '</span><span class="x">' + MIN_SVG + '</span>';
   root.appendChild(launch);
 
   // 聊天面板(iframe 懒加载:首次打开才设 src,不拖慢首屏)
@@ -101,8 +102,9 @@
   panel.setAttribute("aria-label", "GMIC AI chat");
   var closeBtn = document.createElement("button");
   closeBtn.type = "button"; closeBtn.className = "close";
-  closeBtn.setAttribute("aria-label", "Close chat");
-  closeBtn.innerHTML = X_SVG;
+  closeBtn.setAttribute("aria-label", "Minimize chat");
+  closeBtn.setAttribute("title", "Minimize");
+  closeBtn.innerHTML = MIN_SVG;
   var frame = document.createElement("iframe");
   frame.title = "GMIC AI chat";
   frame.setAttribute("loading", "lazy");
@@ -117,7 +119,7 @@
     if (v && !loaded) { frame.src = WIDGET_URL; loaded = true; }   // 懒加载
     launch.classList.toggle("open", v);
     panel.classList.toggle("open", v);
-    launch.setAttribute("aria-label", v ? "Close chat" : "Chat with us");
+    launch.setAttribute("aria-label", v ? "Minimize chat" : "Chat with us");
   }
   launch.addEventListener("click", function () { setOpen(!open); });
   closeBtn.addEventListener("click", function () { setOpen(false); });

@@ -445,6 +445,13 @@ async def questionnaire(req: QuestionnaireReq):
     #    产出:reply = 量身方案文本;throwbacks = 要甩回的直连渠道(通常问卷这步为空)。
     reply, throwbacks = await _reply_and_archive(req.session_id)
 
+    # 8b) 确定性追加 follow-up:模型只可靠地出"推荐"那一段(实测它会忽略 prompt 里"再追问一句"的要求),
+    #     所以这句"想多说点需求 + 留个联系方式,真人尽快跟进"由后端补,保证【每次问卷后一定出现】。
+    #     用空行分隔 → 前端 splitReply 会渲染成【第二个气泡】(方案一个、追问一个)。文案在 widget.json,可改。
+    followup = CONFIG.get("questionnaire_followup")
+    if followup:
+        reply = (reply + "\n\n" + followup) if reply else followup
+
     # 9) 算出这个 Tab 要展示给用户的链接(方案链接 / Tab3 推荐链接 / Book-a-demo 日历)。
     links = _questionnaire_links(req.tab, q, recommendation)
 
