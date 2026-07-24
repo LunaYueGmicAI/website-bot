@@ -152,13 +152,14 @@ def questionnaire_line(answers_by_tab, recommendations_by_tab):
     header = "The visitor completed one or more guided questionnaires. Their selections:"
     # 收尾指令:立刻出方案 + 别重复问 + 自然引向索样和留联系方式(承接 PERSONA 目标 #2)
     trailer = ("Give a brief, tailored recommendation NOW using these selections; do NOT ask these "
-               "questions again. Structure your reply as AT MOST TWO short paragraphs separated by a "
-               "blank line. Paragraph 1: the recommendation as ONE flowing paragraph (which product "
-               "and why it fits, folding in any must-haves it meets; do not split it across lines). "
-               "Paragraph 2: ONE flowing sentence that BOTH invites them to share more about their "
-               "requirements AND, joined with a connector, invites one contact method (email, phone, "
-               "or a messaging app) so a REAL member of our team, not a bot, can personally follow up "
-               "shortly. Do not put each sentence on its own line.")
+               "questions again. Your reply MUST have EXACTLY TWO short paragraphs separated by a "
+               "blank line, and you must ALWAYS include the second one. Paragraph 1: the recommendation "
+               "as ONE flowing paragraph (which product and why it fits, folding in any must-haves it "
+               "meets; do not split it across lines). Paragraph 2 (never omit this): ONE flowing "
+               "sentence that BOTH invites them to share more about their requirements AND, joined with "
+               "a connector, invites one contact method (email, phone, or a messaging app) so a REAL "
+               "member of our team, not a bot, can personally follow up shortly. Do not put each "
+               "sentence on its own line.")
     return "\n".join([header] + body + [trailer])
 
 

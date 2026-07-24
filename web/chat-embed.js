@@ -47,6 +47,15 @@
   (document.body || document.documentElement).appendChild(host);
   var root = host.attachShadow ? host.attachShadow({ mode: "open" }) : host;
 
+  // 宿主页的"返回顶部"键(#backTop,Meng 的)本来也在右下角,会被聊天气泡盖住。往上顶一档,
+  // 让它叠在聊天气泡【上方】(两个都靠右、上下错开)。注入到宿主页 head(不在 shadow 里才能作用到它)。
+  try {
+    var hs = document.createElement("style");
+    hs.textContent = "#backTop{bottom:90px !important;}" +
+      "@media (max-width:480px){#backTop{bottom:84px !important;}}";
+    (document.head || document.documentElement).appendChild(hs);
+  } catch (e) {}
+
   var style = document.createElement("style");
   style.textContent =
     ":host,*{box-sizing:border-box;}" +
@@ -70,9 +79,9 @@
     "cursor:pointer;background:rgba(255,255,255,.85);color:#1f2430;display:grid;place-items:center;" +
     "box-shadow:0 2px 8px rgba(0,0,0,.15);}" +
     ".close:hover{background:#fff;} .close svg{width:15px;height:15px;}" +
-    // 手机:面板近全屏
+    // 手机:面板做成【底部抽屉】(约 72vh,不铺满全屏——顶部留出页面可见,不压迫)
     "@media (max-width:480px){" +
-    ".panel{right:8px;left:8px;bottom:84px;width:auto;height:auto;top:12px;max-height:none;}" +
+    ".panel{right:8px;left:8px;bottom:82px;top:auto;width:auto;height:72vh;max-height:calc(100vh - 104px);}" +
     ".launch{right:16px;bottom:16px;}}" +
     "@media (prefers-reduced-motion:reduce){.launch,.panel{transition:none;}}";
   root.appendChild(style);
