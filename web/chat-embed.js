@@ -52,12 +52,11 @@
   (document.body || document.documentElement).appendChild(host);
   var root = host.attachShadow ? host.attachShadow({ mode: "open" }) : host;
 
-  // 宿主页的"返回顶部"键(#backTop,Meng 的)本来也在右下角,会被聊天气泡盖住。往上顶一档,
-  // 让它叠在聊天气泡【上方】(两个都靠右、上下错开)。注入到宿主页 head(不在 shadow 里才能作用到它)。
+  // 宿主页的"返回顶部"键(#backTop,Meng 的)全站都有,只是滚动才显示。Luna 觉得鸡肋 → 全站隐藏。
+  // 隐藏后聊天气泡独占右下角。注入到宿主页 head(不在 shadow 里才能作用到宿主元素)。要恢复:删掉这段即可。
   try {
     var hs = document.createElement("style");
-    hs.textContent = "#backTop{bottom:90px !important;}" +
-      "@media (max-width:480px){#backTop{bottom:84px !important;}}";
+    hs.textContent = "#backTop{display:none !important;}";
     (document.head || document.documentElement).appendChild(hs);
   } catch (e) {}
 
