@@ -36,10 +36,14 @@
     '<circle cx="14" cy="12.6" r="1.05" fill="currentColor" stroke="none"/>' +
     '<path d="M10.2 15.4q1.8 1.2 3.6 0"/></svg>';
 
-  // 最小化图标(向下收起的箭头)——点它把面板收回气泡,对话不丢,方便暂时看网站。
+  // 最小化图标(一根横杠,经典"最小化")——收起面板回气泡,对话【保留】,方便暂时看网站。
   var MIN_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
-    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+    'stroke-linecap="round" aria-hidden="true"><path d="M6 12h12"/></svg>';
+  // 关闭图标(X)——彻底删除本次对话,下次打开是全新会话。
+  var X_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+    'stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
   // 宿主锚点 + Shadow DOM(样式与宿主页彻底隔离)
   var host = document.createElement("div");
@@ -75,11 +79,13 @@
     "transition:opacity .18s,transform .18s;}" +
     ".panel.open{opacity:1;transform:none;pointer-events:auto;}" +
     ".panel iframe{width:100%;height:100%;border:0;display:block;}" +
-    // 面板右上角浮动关闭键(盖在 widget 头部右侧空白处)
-    ".close{position:absolute;top:11px;right:11px;width:28px;height:28px;border-radius:50%;border:none;" +
-    "cursor:pointer;background:rgba(255,255,255,.85);color:#1f2430;display:grid;place-items:center;" +
+    // 面板右上角一排两个控制键:最小化(横杠)+ 关闭(X)。浮在 widget 头部右侧空白处。
+    ".ctrls{position:absolute;top:10px;right:10px;display:flex;gap:6px;}" +
+    ".ctrl{width:28px;height:28px;border-radius:50%;border:none;cursor:pointer;" +
+    "background:rgba(255,255,255,.85);color:#1f2430;display:grid;place-items:center;" +
     "box-shadow:0 2px 8px rgba(0,0,0,.15);}" +
-    ".close:hover{background:#fff;} .close svg{width:15px;height:15px;}" +
+    ".ctrl:hover{background:#fff;} .ctrl svg{width:15px;height:15px;}" +
+    ".ctrl.close:hover{background:#fee2e2;color:#b91c1c;}" +   // X hover 变红,暗示"删除"
     // 手机:面板做成【底部抽屉】(约 72vh,不铺满全屏——顶部留出页面可见,不压迫)
     "@media (max-width:480px){" +
     ".panel{right:8px;left:8px;bottom:82px;top:auto;width:auto;height:72vh;max-height:calc(100vh - 104px);}" +
@@ -100,17 +106,22 @@
   panel.className = "panel";
   panel.setAttribute("role", "dialog");
   panel.setAttribute("aria-label", "GMIC AI chat");
-  var closeBtn = document.createElement("button");
-  closeBtn.type = "button"; closeBtn.className = "close";
-  closeBtn.setAttribute("aria-label", "Minimize chat");
-  closeBtn.setAttribute("title", "Minimize");
-  closeBtn.innerHTML = MIN_SVG;
+  var ctrls = document.createElement("div"); ctrls.className = "ctrls";
+  var minBtn = document.createElement("button");     // 最小化:收起、对话保留
+  minBtn.type = "button"; minBtn.className = "ctrl min";
+  minBtn.setAttribute("aria-label", "Minimize chat"); minBtn.setAttribute("title", "Minimize (keep chat)");
+  minBtn.innerHTML = MIN_SVG;
+  var closeBtn = document.createElement("button");   // 关闭:删除对话,下次全新
+  closeBtn.type = "button"; closeBtn.className = "ctrl close";
+  closeBtn.setAttribute("aria-label", "Close and clear chat"); closeBtn.setAttribute("title", "Close (clear chat)");
+  closeBtn.innerHTML = X_SVG;
+  ctrls.appendChild(minBtn); ctrls.appendChild(closeBtn);
   var frame = document.createElement("iframe");
   frame.title = "GMIC AI chat";
   frame.setAttribute("loading", "lazy");
   frame.allow = "clipboard-write";
   panel.appendChild(frame);
-  panel.appendChild(closeBtn);
+  panel.appendChild(ctrls);
   root.appendChild(panel);
 
   var open = false, loaded = false;
@@ -121,7 +132,14 @@
     panel.classList.toggle("open", v);
     launch.setAttribute("aria-label", v ? "Minimize chat" : "Chat with us");
   }
-  launch.addEventListener("click", function () { setOpen(!open); });
-  closeBtn.addEventListener("click", function () { setOpen(false); });
+  // 删除对话:收起面板 + 把 iframe 重载成【全新会话】(?new= → widget 忽略旧 session_id,开一段新的)。
+  function deleteChat() {
+    setOpen(false);
+    frame.src = WIDGET_URL + "?new=" + Date.now();   // widget 见到 ?new 就起新会话(见 index.html session 初始化)
+    loaded = true;
+  }
+  launch.addEventListener("click", function () { setOpen(!open); });   // 气泡:开/最小化(对话保留)
+  minBtn.addEventListener("click", function () { setOpen(false); });   // 最小化:收起,对话保留
+  closeBtn.addEventListener("click", deleteChat);                      // X:删除对话,下次全新
   document.addEventListener("keydown", function (e) { if (e.key === "Escape" && open) setOpen(false); });
 })();

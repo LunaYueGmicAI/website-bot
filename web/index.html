@@ -150,7 +150,9 @@ const $ = (id) => document.getElementById(id);
 const messagesEl = $("messages"), textEl = $("text"), sendBtn = $("send");
 
 const SID_KEY = "gmic_bot_sid";
-let sessionId = localStorage.getItem(SID_KEY);
+// 父页(chat-embed.js)点"X 删除对话"时会带 ?new= 重载本 iframe → 忽略旧 session_id,开一段全新会话。
+const _forceNew = /[?&]new=/.test(location.search);
+let sessionId = _forceNew ? null : localStorage.getItem(SID_KEY);
 if (!sessionId) {
   sessionId = "sess_" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "_" + Math.floor(Math.random() * 1e6));
   localStorage.setItem(SID_KEY, sessionId);
