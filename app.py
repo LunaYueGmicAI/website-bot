@@ -82,6 +82,18 @@ async def embed_js():
     )
 
 
+# ⭐ 可嵌入的【聊天】启动器(chat-embed.js):gmic.ai 用 <script src=".../chat-embed.js"> 引入,
+#   在页面右下角放聊天气泡按钮,点开弹出 <iframe src="/widget/"> 聊天面板(见 web/chat-embed.js)。
+#   no-cache 便于迭代后尽快生效(改启动器只动这文件 + git pull,免重发 WP)。
+@app.get("/chat-embed.js")
+async def chat_embed_js():
+    return FileResponse(
+        os.path.join(_WEB_DIR, "chat-embed.js"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 if __name__ == "__main__":
     # 方便本地直接 `python app.py` 起服务;生产建议直接用 uvicorn 命令(见文件顶部)。
     import uvicorn
