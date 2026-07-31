@@ -89,6 +89,16 @@
     "@media (max-width:480px){" +
     ".panel{right:8px;left:8px;bottom:82px;top:auto;width:auto;height:72vh;max-height:calc(100vh - 104px);}" +
     ".launch{right:16px;bottom:16px;}}" +
+    // 手机:气泡上移躲开宿主页(gmic.ai)底部那条居中的联系栏 .fab —— 它 bottom:24px、高 60px,
+    // 右端最后一个是 ⋯(More)键;窄屏下条子右端会伸到右下角,和 bottom:16px 的气泡撞在一起
+    // (实测 390px:重叠 48×50px,正好压住 ⋯)。抬到 bottom:96px = 24+60 条高 + 12 留白。
+    // 断点用 520px 不是 480:重叠在视口 <≈486px 才发生,520 留一点余量(算式见下)。
+    //   条子右端 = 视口/2 + 168.5   气泡左端 = 视口 - 20 - 58
+    //   两者相交 ⇔ 视口 < 486px
+    // 面板跟着上移(必须待在气泡上方):96 气泡底 + 58 气泡高 + 10 留白 = 164。
+    "@media (max-width:520px){" +
+    ".launch{bottom:96px;}" +
+    ".panel{bottom:164px;max-height:calc(100vh - 186px);}}" +
     "@media (prefers-reduced-motion:reduce){.launch,.panel{transition:none;}}";
   root.appendChild(style);
 
